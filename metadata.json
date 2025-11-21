@@ -1,0 +1,9 @@
+{
+  "name": "DangHoang Ebook v2",
+  "description": "Hệ thống Elearning chuyên nghiệp hỗ trợ học tập, quản lý tài chính và trợ lý ảo thông minh.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
