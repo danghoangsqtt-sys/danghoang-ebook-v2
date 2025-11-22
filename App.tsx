@@ -9,6 +9,7 @@ import { Planner } from './pages/Planner';
 import { Finance } from './pages/Finance';
 import { Settings } from './pages/Settings';
 import { VocabLibrary } from './pages/VocabLibrary';
+import { Management } from './pages/Management';
 
 // --- Theme Context ---
 type Theme = 'light' | 'dark';
@@ -60,6 +61,7 @@ function App() {
             <Route path="/planner" element={<Planner />} />
             <Route path="/finance" element={<Finance />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/management" element={<Management />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>

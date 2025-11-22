@@ -1,10 +1,9 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, PropsWithChildren } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
 import { firebaseService } from '../services/firebase';
 import { geminiService } from '../services/gemini';
-import { AdminDashboard } from '../components/AdminDashboard';
 import { speechService, VoiceSettings, DEFAULT_VOICE_SETTINGS } from '../services/speech';
 
 const DATA_KEYS = [
@@ -16,19 +15,12 @@ const DATA_KEYS = [
     'dh_voice_settings'
 ];
 
-interface ErrorBoundaryProps {
-    children: React.ReactNode;
-}
-
 interface ErrorBoundaryState {
     hasError: boolean;
 }
 
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-    constructor(props: ErrorBoundaryProps) {
-        super(props);
-        this.state = { hasError: false };
-    }
+class ErrorBoundary extends React.Component<PropsWithChildren<{}>, ErrorBoundaryState> {
+    state: ErrorBoundaryState = { hasError: false };
 
     static getDerivedStateFromError(error: any) {
         return { hasError: true };
@@ -366,7 +358,7 @@ export const Settings: React.FC = () => {
 
                                         {isAdmin ? (
                                             <div className="bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-xl p-6">
-                                                <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
+                                                <div className="mb-0">
                                                     <label className="text-sm font-bold text-gray-700 dark:text-gray-200 block mb-2">System-wide Gemini API Key (Admin)</label>
                                                     <div className="flex gap-2">
                                                         <div className="relative flex-1">
@@ -391,8 +383,6 @@ export const Settings: React.FC = () => {
                                                     </div>
                                                     <p className="text-xs text-gray-500 mt-2">* Key này sẽ được dùng cho toàn bộ hệ thống.</p>
                                                 </div>
-                                                {/* Integrated Admin Dashboard */}
-                                                <AdminDashboard />
                                             </div>
                                         ) : (
                                             <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
@@ -566,6 +556,13 @@ export const Settings: React.FC = () => {
                                                                 <span>⚠️</span> Chưa kích hoạt
                                                             </span>
                                                         )}
+                                                        <button
+                                                            onClick={handleGoogleLogin}
+                                                            disabled={isLoggingIn}
+                                                            className="px-3 py-1 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 rounded text-xs font-bold flex items-center gap-1 transition-colors"
+                                                        >
+                                                            {isLoggingIn ? 'Connecting...' : '🔄 Làm mới kết nối Google'}
+                                                        </button>
                                                     </div>
                                                 </div>
                                                 <button onClick={handleLogout} className="px-5 py-2 bg-white dark:bg-gray-800 text-red-600 border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl font-bold shadow-sm transition-colors whitespace-nowrap">

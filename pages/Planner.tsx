@@ -143,9 +143,13 @@ export const Planner: React.FC = () => {
             const merged = [...localOnly, ...googleEvents];
             setEvents(merged);
             alert(`Đã đồng bộ thành công ${googleEvents.length} sự kiện từ Google Calendar!`);
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            alert("Lỗi đồng bộ: " + (e as any).message);
+            if (e.message === 'TOKEN_EXPIRED' || e.message === 'NO_TOKEN' || (e.message && e.message.includes('invalid authentication credentials'))) {
+                alert("Phiên làm việc với Google Calendar đã hết hạn.\n\nVui lòng vào Cài Đặt > Tài khoản > Nhấn 'Làm mới kết nối' để cấp lại quyền truy cập.");
+            } else {
+                alert("Lỗi đồng bộ: " + e.message);
+            }
         } finally {
             setIsSyncing(false);
         }
@@ -223,9 +227,13 @@ export const Planner: React.FC = () => {
                 try {
                     const googleId = await googleCalendarService.createEvent(newItem);
                     newItem.googleEventId = googleId;
-                } catch (e) {
+                } catch (e: any) {
                     console.error("Failed to sync to google", e);
-                    alert("Lưu local thành công nhưng lỗi đồng bộ Google: " + (e as any).message);
+                    if (e.message === 'TOKEN_EXPIRED' || e.message === 'NO_TOKEN') {
+                        alert("Đã lưu local, nhưng không thể đồng bộ lên Google Calendar do phiên hết hạn. Vui lòng làm mới kết nối trong Cài Đặt.");
+                    } else {
+                        alert("Lưu local thành công nhưng lỗi đồng bộ Google: " + e.message);
+                    }
                 }
             }
 

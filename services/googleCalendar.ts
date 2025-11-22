@@ -14,7 +14,7 @@ class GoogleCalendarService {
 
     async listEvents(timeMin?: string, timeMax?: string): Promise<CalendarEvent[]> {
         const token = this.getAccessToken();
-        if (!token) throw new Error("No Access Token. Please login again.");
+        if (!token) throw new Error("NO_TOKEN");
 
         const min = timeMin || new Date().toISOString();
         const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${min}&singleEvents=true&orderBy=startTime`;
@@ -25,13 +25,17 @@ class GoogleCalendarService {
             }
         });
 
+        if (response.status === 401) {
+            throw new Error("TOKEN_EXPIRED");
+        }
+
         if (!response.ok) {
             const err = await response.json();
             throw new Error(err.error?.message || "Failed to fetch events");
         }
 
         const data = await response.json();
-        
+
         // Map Google Events to App Events
         return data.items.map((item: any) => ({
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9), // Local ID
@@ -47,7 +51,7 @@ class GoogleCalendarService {
 
     async createEvent(event: CalendarEvent): Promise<string> {
         const token = this.getAccessToken();
-        if (!token) throw new Error("No Access Token");
+        if (!token) throw new Error("NO_TOKEN");
 
         const eventBody = {
             summary: event.title,
@@ -70,6 +74,10 @@ class GoogleCalendarService {
             },
             body: JSON.stringify(eventBody)
         });
+
+        if (response.status === 401) {
+            throw new Error("TOKEN_EXPIRED");
+        }
 
         if (!response.ok) {
             const err = await response.json();

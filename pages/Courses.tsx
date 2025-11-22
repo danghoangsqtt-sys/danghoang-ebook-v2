@@ -81,6 +81,23 @@ const insertNode = (nodes: CourseNode[], newNode: CourseNode, parentId: string |
     });
 };
 
+const insertSibling = (nodes: CourseNode[], newNode: CourseNode, targetId: string, position: 'before' | 'after'): CourseNode[] => {
+    const index = nodes.findIndex(n => n.id === targetId);
+    if (index !== -1) {
+        const newNodes = [...nodes];
+        if (position === 'before') newNodes.splice(index, 0, newNode);
+        else newNodes.splice(index + 1, 0, newNode);
+        return newNodes;
+    }
+
+    return nodes.map(node => {
+        if (node.children) {
+            return { ...node, children: insertSibling(node.children, newNode, targetId, position) };
+        }
+        return node;
+    });
+};
+
 const updateNode = (nodes: CourseNode[], id: string, updates: Partial<CourseNode>): CourseNode[] => {
     return nodes.map(node => {
         if (node.id === id) return { ...node, ...updates, updatedAt: Date.now() };
@@ -96,10 +113,11 @@ const isDescendant = (nodes: CourseNode[], sourceId: string, targetId: string): 
     return !!findNode(sourceNode.children, targetId);
 };
 
-const moveNode = (nodes: CourseNode[], nodeId: string, targetParentId: string): CourseNode[] => {
+const reorderNode = (nodes: CourseNode[], nodeId: string, targetId: string, position: 'before' | 'after' | 'inside'): CourseNode[] => {
+    if (nodeId === targetId) return nodes;
+
     // 1. Validation
-    if (nodeId === targetParentId) return nodes; // Can't move to self
-    if (isDescendant(nodes, nodeId, targetParentId)) {
+    if (position === 'inside' && isDescendant(nodes, nodeId, targetId)) {
         alert("Không thể di chuyển thư mục vào bên trong chính nó.");
         return nodes;
     }
@@ -112,7 +130,11 @@ const moveNode = (nodes: CourseNode[], nodeId: string, targetParentId: string): 
     const treeWithoutNode = removeNode(nodes, nodeId);
 
     // 4. Insert to new location
-    return insertNode(treeWithoutNode, nodeToMove, targetParentId);
+    if (position === 'inside') {
+        return insertNode(treeWithoutNode, nodeToMove, targetId);
+    } else {
+        return insertSibling(treeWithoutNode, nodeToMove, targetId, position);
+    }
 };
 
 // --- Components ---
@@ -125,11 +147,11 @@ interface TreeItemProps {
     onToggleExpand: (id: string) => void;
     onSelect: (node: CourseNode) => void;
     onAction: (action: 'edit' | 'delete' | 'pin', node: CourseNode) => void;
-    onMove: (draggedId: string, targetId: string) => void; // Drag & Drop handler
+    onMove: (draggedId: string, targetId: string, position: 'before' | 'after' | 'inside') => void;
 }
 
 const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onToggleExpand, onSelect, onAction, onMove }) => {
-    const [isDragOver, setIsDragOver] = useState(false);
+    const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside' | null>(null);
     const isSelected = node.type === 'file' && selectedLessonId === node.data?.id;
     const isFolder = node.type === 'folder';
 
@@ -154,27 +176,43 @@ const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onT
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const height = rect.height;
+
         if (isFolder) {
-            setIsDragOver(true);
-            e.dataTransfer.dropEffect = 'move';
+            if (y < height * 0.25) setDropPosition('before');
+            else if (y > height * 0.75) setDropPosition('after');
+            else setDropPosition('inside');
+        } else {
+            if (y < height * 0.5) setDropPosition('before');
+            else setDropPosition('after');
         }
+        e.dataTransfer.dropEffect = 'move';
     };
 
     const handleDragLeave = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        setIsDragOver(false);
+        setDropPosition(null);
     };
 
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        setIsDragOver(false);
+
         const draggedId = e.dataTransfer.getData('text/plain');
-        if (draggedId && draggedId !== node.id && isFolder) {
-            onMove(draggedId, node.id);
+        if (draggedId && draggedId !== node.id && dropPosition) {
+            onMove(draggedId, node.id, dropPosition);
         }
+        setDropPosition(null);
     };
+
+    let dropClass = '';
+    if (dropPosition === 'before') dropClass = 'border-t-2 border-blue-500';
+    else if (dropPosition === 'after') dropClass = 'border-b-2 border-blue-500';
+    else if (dropPosition === 'inside') dropClass = 'bg-blue-100 dark:bg-blue-900/40 ring-2 ring-blue-500 ring-inset';
 
     return (
         <div className="select-none relative">
@@ -187,7 +225,7 @@ const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onT
                 className={`
             group flex items-center gap-2 py-3 md:py-2 pr-2 cursor-pointer transition-all rounded-lg mx-2 mb-0.5 border border-transparent
             ${isSelected ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}
-            ${isDragOver ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : ''}
+            ${dropClass}
           `}
                 style={{ paddingLeft: `${level * 12 + 8}px` }} // Indentation
                 onClick={(e) => {
@@ -308,15 +346,36 @@ export const Courses: React.FC = () => {
 
     useEffect(() => {
         const load = async () => {
-            const cloud = await firebaseService.getCourseTree();
-            if (cloud) setCourseTree(cloud);
-            else {
+            let data: CourseNode[] | null = null;
+
+            // If logged in, try fetch cloud
+            if (firebaseService.auth.currentUser) {
+                data = await firebaseService.getCourseTree();
+            }
+
+            if (data) {
+                setCourseTree(data);
+            } else {
+                // Fallback to local storage (Guest mode OR if cloud is empty/user new)
                 const saved = localStorage.getItem('dh_course_tree_v2');
-                if (saved) setCourseTree(JSON.parse(saved));
-                else setCourseTree([{ id: 'root', title: 'Học liệu mẫu', type: 'folder', isOpen: true, children: [] }]);
+                if (saved) {
+                    setCourseTree(JSON.parse(saved));
+                } else {
+                    // Default sample data for a fresh guest/user
+                    setCourseTree([{ id: 'root', title: 'Học liệu mẫu', type: 'folder', isOpen: true, children: [] }]);
+                }
             }
         };
+
+        // Listen for auth changes to switch data
+        const unsubscribe = firebaseService.auth.onAuthStateChanged(() => {
+            load();
+        });
+
+        // Initial load
         load();
+
+        return () => unsubscribe();
     }, []);
 
     useEffect(() => {
@@ -385,8 +444,8 @@ export const Courses: React.FC = () => {
         }
     };
 
-    const handleMoveNode = useCallback((draggedId: string, targetParentId: string) => {
-        setCourseTree(prev => moveNode(prev, draggedId, targetParentId));
+    const handleMoveNode = useCallback((draggedId: string, targetId: string, position: 'before' | 'after' | 'inside') => {
+        setCourseTree(prev => reorderNode(prev, draggedId, targetId, position));
     }, []);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -442,12 +501,12 @@ export const Courses: React.FC = () => {
                     data: activeTab !== 'folder' ? { ...newNodeData, type: finalType } as LessonContent : undefined
                 });
 
-                // Handle Move if Parent Changed
+                // Handle Move if Parent Changed via Dropdown
                 const currentPath = findPath(updated, editNodeId);
                 const currentParentId = currentPath.length > 1 ? currentPath[currentPath.length - 2].id : 'root';
 
                 if (parentId && parentId !== currentParentId) {
-                    updated = moveNode(updated, editNodeId, parentId);
+                    updated = reorderNode(updated, editNodeId, parentId, 'inside');
                 }
                 return updated;
             });
