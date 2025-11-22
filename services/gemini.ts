@@ -156,6 +156,23 @@ class GeminiService {
     }
   }
 
+  async searchContent(prompt: string): Promise<string> {
+    if (!this.ai) throw new Error("No API Key");
+    try {
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+        }
+      });
+      return response.text || "Không tìm thấy thông tin.";
+    } catch (e) {
+      console.error("Search Error", e);
+      return "Lỗi khi tìm kiếm thông tin: " + (e as any).message;
+    }
+  }
+
   async *chatStream(
     history: { role: string, parts: { text: string }[] }[],
     message: string,

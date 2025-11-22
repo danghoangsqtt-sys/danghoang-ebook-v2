@@ -1001,7 +1001,7 @@ export const Finance: React.FC = () => {
                 <div><h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Tài Chính</h1><p className="text-gray-500 mt-1 text-sm">Quản lý dòng tiền {currentUser ? '(Đã đồng bộ Cloud)' : '(Chế độ Khách)'}</p></div>
             </div>
             <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-full overflow-x-auto no-scrollbar">
-                {[{ id: 'overview', label: 'Tổng Quan' }, { id: 'budget', label: 'Ngân Sách' }, { id: 'goals', label: 'Mục Tiêu' }, { id: 'debt', label: 'Sổ Nợ' }, { id: 'invest', label: 'Thị trường & Đầu tư' }].map(t => (
+                {[{ id: 'overview', label: 'Tổng Quan' }, { id: 'budget', label: 'Ngân Sách' }, { id: 'goals', label: 'Mục Tiêu' }, { id: 'debt', label: 'Sổ Nợ' }, { id: 'invest', label: 'Thông tin Thị trường & Vàng' }].map(t => (
                     <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition-all ${activeTab === t.id ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'}`}>{t.label}</button>
                 ))}
             </div>

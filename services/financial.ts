@@ -209,43 +209,50 @@ class FinancialService {
         }
     }
 
-    async generateMarketAnalysisAndAdvice(uid: string, marketData: MarketData): Promise<MarketAnalysisResult> {
-        const avgIncome = await this.calculateAvgIncome(uid);
-        const incomeContext = avgIncome > 0 ? `${(avgIncome / 1000000).toFixed(1)}M VND` : "Unknown";
-
+    async generateWeeklyMarketAnalysis(uid: string, marketData: MarketData): Promise<MarketAnalysisResult> {
         const marketSummary = `
-      - VN-Index: ${marketData.vnIndex.value} (${marketData.vnIndex.changePercent > 0 ? '+' : ''}${marketData.vnIndex.changePercent}%)
+      - VN-Index: ${marketData.vnIndex.value}
       - SJC Gold: Sell ${marketData.sjcGold.sell} / Buy ${marketData.sjcGold.buy}
-      - Bitcoin: $${marketData.items.find(i => i.symbol === 'BTC')?.price}
-      - USD/VND: ${marketData.items.find(i => i.symbol === 'USD')?.price}
       - World Gold: $${marketData.items.find(i => i.symbol === 'XAU')?.price}/oz
       `;
 
         const prompt = `
-      Role: Senior Financial Strategist for Vietnam Market.
-      User Income: ${incomeContext}/month.
+      Role: Senior Financial Analyst for Vietnam Market.
+      Context: Weekly Market Report.
       
-      LIVE Market Snapshot:
+      LIVE Data Snapshot:
       ${marketSummary}
       
       Task: 
-      1. Analyze the current trend of Gold (SJC gap vs World), Crypto, and Stocks (VN-Index).
-      2. Based on the user's income level (if known) and market conditions, suggest a portfolio allocation.
-      3. Provide specific, actionable advice (e.g., "SJC premium is too high, buy Gold Rings instead" or "BTC is volatile, DCA only").
+      1. Provide a 'Weekly Market Trend' summary focusing on Gold and Macroeconomics.
+      2. Analyze the gap between Vietnam SJC Gold and World Gold. Is it high or low?
+      3. Provide an 'Economic Forecast' for the upcoming week.
+      4. Give actionable advice for a standard investor holding Gold or Cash.
 
       Output JSON Schema:
       {
-        "marketTrend": "Short concise summary of the market (max 2 sentences).",
-        "economicForecast": "Bullish/Bearish outlook for next month.",
-        "recommendedAllocation": [
-            { "name": "Asset Name", "percentage": number, "color": "Hex Code" }
-        ],
-        "investmentAdvice": "Detailed advice paragraph.",
+        "marketTrend": "Summary of the week's major trend.",
+        "economicForecast": "Forecast for next week.",
+        "recommendedAllocation": [], 
+        "investmentAdvice": "Advice regarding Gold accumulation vs selling.",
         "actionableSteps": ["Step 1", "Step 2", "Step 3"]
       }
       `;
 
         return await geminiService.analyzeMarket(prompt);
+    }
+
+    async getMarketNews(): Promise<string> {
+        const today = new Date().toLocaleDateString('vi-VN');
+        const prompt = `
+      Bạn là chuyên gia tin tức tài chính. Hãy tìm kiếm thông tin mới nhất trên internet (Google Search) về hai chủ đề sau tại Việt Nam ngày hôm nay (${today}):
+      1. Thị trường Tài chính (Chứng khoán, Lãi suất, Tỷ giá).
+      2. Thị trường Bất động sản (Xu hướng, Chính sách mới, Giá cả).
+
+      Hãy tổng hợp thành một báo cáo ngắn gọn (Markdown), chia làm 2 phần rõ rệt: "💰 Tin Tài Chính" và "🏘️ Tin Bất Động Sản".
+      Với mỗi tin, hãy kèm theo nguồn (nếu có) dưới dạng liên kết.
+      `;
+        return await geminiService.searchContent(prompt);
     }
 
     // --- Batch Operations ---
