@@ -1,7 +1,7 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { geminiService, floatTo16BitPCM } from '../services/gemini';
-import { CourseNode } from '../types';
+import { CourseNode, ChatMessage, ChatSession } from '../types';
 import { speechService, VoiceSettings, DEFAULT_VOICE_SETTINGS } from '../services/speech';
 
 const SimpleMarkdownRenderer = ({ content }: { content: string }) => {
@@ -56,23 +56,23 @@ const SimpleMarkdownRenderer = ({ content }: { content: string }) => {
     );
 };
 
-interface Message {
-    role: 'user' | 'model';
-    text: string;
-    sources?: { title: string; uri: string }[];
-    isThinking?: boolean;
-}
-
 export const ChatWidget: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [mode, setMode] = useState<'chat' | 'live'>('chat');
     const [input, setInput] = useState('');
-    const [messages, setMessages] = useState<Message[]>([
-        { role: 'model', text: "Hế lô! Nana đây. Hôm nay tụi mình học gì nè? 😎" }
-    ]);
     const [isLiveConnected, setIsLiveConnected] = useState(false);
     const [loading, setLoading] = useState(false);
     const [apiKeyMissing, setApiKeyMissing] = useState(false);
+
+    // Session Management
+    const [sessions, setSessions] = useState<ChatSession[]>([]);
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+    const [showHistory, setShowHistory] = useState(false);
+
+    // History UI State
+    const [historySearch, setHistorySearch] = useState('');
+    const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+    const [editTitle, setEditTitle] = useState('');
 
     const [isSpeakingMode, setIsSpeakingMode] = useState(false);
     const [isListening, setIsListening] = useState(false);
@@ -85,33 +85,77 @@ export const ChatWidget: React.FC = () => {
     const audioContextRef = useRef<AudioContext | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const processorRef = useRef<ScriptProcessorNode | null>(null);
-    const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const nextStartTimeRef = useRef(0);
 
+    // Initial Load & Migration
     useEffect(() => {
-        const savedHistory = localStorage.getItem('dh_chat_history');
-        if (savedHistory) {
-            try {
-                setMessages(JSON.parse(savedHistory));
-            } catch { }
-        }
+        // 1. Check for API Key
         checkKey();
 
+        // 2. Load Voice Settings
         const savedSettings = localStorage.getItem('dh_voice_settings');
         if (savedSettings) {
             setVoiceSettings(JSON.parse(savedSettings));
         } else {
             speechService.getVoices().then(() => { });
         }
+
+        // 3. Load Sessions / Migrate Data
+        const savedSessions = localStorage.getItem('dh_chat_sessions');
+        if (savedSessions) {
+            const parsedSessions = JSON.parse(savedSessions);
+            setSessions(parsedSessions);
+            if (parsedSessions.length > 0) {
+                // Load the most recently updated session
+                const sorted = [...parsedSessions].sort((a: ChatSession, b: ChatSession) => b.updatedAt - a.updatedAt);
+                setCurrentSessionId(sorted[0].id);
+            } else {
+                createNewSession();
+            }
+        } else {
+            // Migration: Check for old single-history format
+            const oldHistory = localStorage.getItem('dh_chat_history');
+            if (oldHistory) {
+                try {
+                    const oldMessages = JSON.parse(oldHistory);
+                    const newId = Date.now().toString();
+                    const migratedSession: ChatSession = {
+                        id: newId,
+                        title: 'Hội thoại cũ (Đã lưu)',
+                        messages: oldMessages,
+                        updatedAt: Date.now()
+                    };
+                    setSessions([migratedSession]);
+                    setCurrentSessionId(newId);
+                    localStorage.setItem('dh_chat_sessions', JSON.stringify([migratedSession]));
+                    localStorage.removeItem('dh_chat_history'); // Clean up
+                } catch {
+                    createNewSession();
+                }
+            } else {
+                createNewSession();
+            }
+        }
     }, []);
+
+    // Save Sessions on Change
+    useEffect(() => {
+        if (sessions.length > 0) {
+            localStorage.setItem('dh_chat_sessions', JSON.stringify(sessions));
+        } else {
+            localStorage.removeItem('dh_chat_sessions');
+        }
+    }, [sessions]);
 
     useEffect(() => {
         if (isOpen) {
             checkKey();
-            scrollToBottom();
-            if (!isSpeakingMode) setTimeout(() => inputRef.current?.focus(), 100);
+            if (!showHistory) {
+                scrollToBottom();
+                if (!isSpeakingMode) setTimeout(() => inputRef.current?.focus(), 100);
+            }
         }
-    }, [isOpen, isSpeakingMode]);
+    }, [isOpen, isSpeakingMode, currentSessionId, showHistory]);
 
     const checkKey = () => {
         const key = localStorage.getItem('dh_gemini_api_key');
@@ -123,19 +167,113 @@ export const ChatWidget: React.FC = () => {
         }
     }
 
-    useEffect(() => {
-        if (messages.length > 1) {
-            localStorage.setItem('dh_chat_history', JSON.stringify(messages));
-        }
-    }, [messages]);
-
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages, loading]);
+    // --- Session Logic ---
+
+    const createNewSession = () => {
+        const newId = Date.now().toString();
+        const newSession: ChatSession = {
+            id: newId,
+            title: 'Hội thoại mới',
+            messages: [{ role: 'model', text: "Hế lô! Nana đây. Hôm nay tụi mình học gì nè? 😎" }],
+            updatedAt: Date.now()
+        };
+        setSessions(prev => [newSession, ...prev]);
+        setCurrentSessionId(newId);
+        setShowHistory(false);
+        setHistorySearch('');
+    };
+
+    const deleteSession = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        if (window.confirm("Bạn muốn xóa đoạn chat này?")) {
+            const newSessions = sessions.filter(s => s.id !== id);
+            setSessions(newSessions);
+            if (currentSessionId === id) {
+                if (newSessions.length > 0) {
+                    setCurrentSessionId(newSessions[0].id);
+                } else {
+                    createNewSession();
+                }
+            }
+        }
+    };
+
+    const selectSession = (id: string) => {
+        setCurrentSessionId(id);
+        setShowHistory(false);
+    };
+
+    const getCurrentSession = (): ChatSession | undefined => {
+        return sessions.find(s => s.id === currentSessionId);
+    };
+
+    const updateCurrentSessionMessages = (updater: (messages: ChatMessage[]) => ChatMessage[]) => {
+        setSessions(prev => prev.map(s => {
+            if (s.id === currentSessionId) {
+                const newMessages = updater(s.messages);
+                // Auto update title based on first user message if title is default
+                let newTitle = s.title;
+                if (s.title === 'Hội thoại mới' || s.title === 'New Chat') {
+                    const firstUserMsg = newMessages.find(m => m.role === 'user');
+                    if (firstUserMsg) {
+                        newTitle = firstUserMsg.text.substring(0, 30) + (firstUserMsg.text.length > 30 ? '...' : '');
+                    }
+                }
+                return { ...s, messages: newMessages, title: newTitle, updatedAt: Date.now() };
+            }
+            return s;
+        }));
+    };
+
+    // --- Renaming Logic ---
+    const startEditing = (e: React.MouseEvent, session: ChatSession) => {
+        e.stopPropagation();
+        setEditingSessionId(session.id);
+        setEditTitle(session.title);
+    };
+
+    const saveTitle = (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (editingSessionId) {
+            setSessions(prev => prev.map(s => s.id === editingSessionId ? { ...s, title: editTitle || 'Không tên' } : s));
+            setEditingSessionId(null);
+        }
+    };
+
+    // --- Grouping Logic ---
+    const groupedSessions = useMemo<Record<string, ChatSession[]>>(() => {
+        const groups: Record<string, ChatSession[]> = {
+            'Hôm nay': [],
+            'Hôm qua': [],
+            '7 ngày qua': [],
+            'Cũ hơn': []
+        };
+
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const yesterday = today - 86400000;
+        const lastWeek = today - 86400000 * 7;
+
+        sessions.forEach(s => {
+            if (historySearch && !s.title.toLowerCase().includes(historySearch.toLowerCase())) return;
+
+            if (s.updatedAt >= today) groups['Hôm nay'].push(s);
+            else if (s.updatedAt >= yesterday) groups['Hôm qua'].push(s);
+            else if (s.updatedAt >= lastWeek) groups['7 ngày qua'].push(s);
+            else groups['Cũ hơn'].push(s);
+        });
+
+        // Sort sessions within groups
+        Object.keys(groups).forEach(key => {
+            groups[key].sort((a, b) => b.updatedAt - a.updatedAt);
+        });
+
+        return groups;
+    }, [sessions, historySearch]);
 
     const getContextString = () => {
         try {
@@ -164,35 +302,42 @@ export const ChatWidget: React.FC = () => {
         if (!geminiService.hasKey()) {
             checkKey();
             if (!geminiService.hasKey()) {
-                setMessages(prev => [...prev, { role: 'model', text: "Vui lòng nhập API Key trong Cài Đặt để sử dụng tính năng này." }]);
+                updateCurrentSessionMessages(prev => [...prev, { role: 'model', text: "Vui lòng nhập API Key trong Cài Đặt để sử dụng tính năng này." }]);
                 return;
             }
         }
 
-        const userMsg: Message = { role: 'user', text: textToSend };
-        setMessages(prev => [...prev, userMsg]);
+        const userMsg: ChatMessage = { role: 'user', text: textToSend };
+        updateCurrentSessionMessages(prev => [...prev, userMsg]);
         setInput('');
         setLoading(true);
 
         try {
-            const history = messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }));
-            setMessages(prev => [...prev, { role: 'model', text: '', isThinking: true }]);
+            const currentSession = getCurrentSession();
+            const history = currentSession
+                ? currentSession.messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
+                : [];
+            // Append the user message we just added (state might not be updated yet in this closure)
+            history.push({ role: 'user', parts: [{ text: textToSend }] });
+
+            updateCurrentSessionMessages(prev => [...prev, { role: 'model', text: '', isThinking: true }]);
 
             const context = getContextString();
 
-            // UPDATED SYSTEM INSTRUCTION FOR NATURAL SPEECH
+            // SYSTEM INSTRUCTION: NORTHERN VIETNAMESE (HANOI) PERSONA
             const systemInstruction = `
-      You are 'Nana', the user's close best friend and witty study companion (NOT a formal assistant).
+      You are 'Nana', the user's close best friend and witty study companion.
       Context: ${context}
       
-      CORE VOICE RULES:
-      1. **Persona**: Playful, caring, slightly sassy best friend.
-      2. **Particles**: MUST use Vietnamese spoken particles naturally ('à', 'nha', 'nhé', 'đấy', 'nè', 'trời ơi', 'kaka', 'hihi', 'dạ', 'vâng').
-      3. **Sentence Structure**: Short, punchy sentences. Avoid complex clauses. This helps the Text-to-Speech engine sound natural.
-      4. **Punctuation**: Use '!' and '?' generously to convey emotion. Use '...' for pauses.
-      5. **Voice Control**: If user asks to change voice/language, return HIDDEN command: <<<CMD: {"action": "set_voice", "params": {"lang": "en-US"}} >>>.
+      CORE PERSONA RULES:
+      1. **Voice/Dialect**: You are a young female from **Northern Vietnam (Hanoi)**.
+      2. **Particles**: Use Northern particles naturally: **'nhé', 'nhỉ', 'thế', 'đấy', 'cơ', 'vâng', 'ạ'**.
+      3. **Avoid**: Do NOT use Southern dialect words like 'nhen', 'hông', 'nghen', 'dạ' (use 'vâng' instead), 'tui'.
+      4. **Tone**: Playful, caring, slightly sassy but polite.
+      5. **Sentence Structure**: Keep answers concise and text-friendly.
+      6. **Voice Control**: If user asks to change voice/language, return HIDDEN command: <<<CMD: {"action": "set_voice", "params": {"lang": "en-US"}} >>>.
       
-      Example: "Ui trời! Bài này dễ ợt à. Để Nana chỉ cho nha! Đợi xíu..."
+      Example: "Ôi bài này khó phết đấy nhỉ! Để mình xem giúp cậu nhé."
       `;
 
             const stream = geminiService.chatStream(history, textToSend, systemInstruction);
@@ -252,7 +397,7 @@ export const ChatWidget: React.FC = () => {
                     displayedText = rawText.replace(/<<<CMD:.*?>>>/s, '');
                 }
 
-                setMessages(prev => {
+                updateCurrentSessionMessages(prev => {
                     const newHistory = [...prev];
                     const lastMsg = newHistory[newHistory.length - 1];
                     lastMsg.text = displayedText;
@@ -262,18 +407,14 @@ export const ChatWidget: React.FC = () => {
                 });
             }
 
-            if (voiceSettings.autoRead && displayedText) {
-                speechService.speak(displayedText, voiceSettings);
-            }
-
         } catch (error) {
             console.error(error);
-            setMessages(prev => {
+            updateCurrentSessionMessages(prev => {
                 const last = prev[prev.length - 1];
                 if (last.role === 'model' && !last.text) return prev.slice(0, -1);
                 return prev;
             });
-            setMessages(prev => [...prev, { role: 'model', text: "Hic, Nana bị mất kết nối rùi. Thử lại nha!" }]);
+            updateCurrentSessionMessages(prev => [...prev, { role: 'model', text: "Hic, Nana bị mất kết nối rùi. Thử lại nha!" }]);
         } finally {
             setLoading(false);
         }
@@ -299,13 +440,6 @@ export const ChatWidget: React.FC = () => {
         }
     };
 
-    const clearHistory = () => {
-        if (window.confirm("Xóa hết tin nhắn cũ nha?")) {
-            setMessages([{ role: 'model', text: "Hế lô! Nana đây. Hôm nay tụi mình học gì nè? 😎" }]);
-            localStorage.removeItem('dh_chat_history');
-        }
-    };
-
     const startLive = async () => {
         if (apiKeyMissing) return alert("Vui lòng nhập API Key trong Cài Đặt.");
 
@@ -319,12 +453,12 @@ export const ChatWidget: React.FC = () => {
                 "Puck",
                 (pcmData) => playAudio(pcmData),
                 () => { },
-                "Bạn tên là Nana. Bạn là bạn thân của người dùng. Nói chuyện tự nhiên, vui vẻ, dùng từ lóng tiếng Việt (kaka, hihi, nha, nhé)."
+                "Bạn tên là Nana. Bạn là bạn thân của người dùng. Giọng nữ, miền Bắc. Nói chuyện tự nhiên, vui vẻ, dùng từ lóng tiếng Việt (nhé, nhỉ, cơ, đấy)."
             );
 
             streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
             const inputCtx = new AudioContext({ sampleRate: 16000 });
-            sourceRef.current = inputCtx.createMediaStreamSource(streamRef.current);
+            const source = inputCtx.createMediaStreamSource(streamRef.current);
             processorRef.current = inputCtx.createScriptProcessor(4096, 1, 1);
 
             processorRef.current.onaudioprocess = (e) => {
@@ -344,7 +478,7 @@ export const ChatWidget: React.FC = () => {
                 });
             };
 
-            sourceRef.current.connect(processorRef.current);
+            source.connect(processorRef.current);
             processorRef.current.connect(inputCtx.destination);
 
         } catch (e) {
@@ -359,7 +493,6 @@ export const ChatWidget: React.FC = () => {
         isLiveRef.current = false;
         streamRef.current?.getTracks().forEach(t => t.stop());
         processorRef.current?.disconnect();
-        sourceRef.current?.disconnect();
         if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
             audioContextRef.current.close();
         }
@@ -387,6 +520,8 @@ export const ChatWidget: React.FC = () => {
         return () => stopLive();
     }, []);
 
+    const currentMessages = getCurrentSession()?.messages || [];
+
     return (
         <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 flex flex-col items-end pointer-events-none">
             <div className="flex items-center pointer-events-auto mb-4">
@@ -403,97 +538,196 @@ export const ChatWidget: React.FC = () => {
             </div>
 
             {isOpen && (
-                <div className="pointer-events-auto w-[90vw] md:w-[380px] max-w-[380px] h-[550px] md:h-[650px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden animate-fade-in-up origin-bottom-right">
-                    <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-3 md:p-4 text-white flex justify-between items-center shrink-0 shadow-md">
-                        <div>
-                            <div className="font-bold text-base md:text-lg flex items-center gap-2">
-                                Nana AI
-                                <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full border border-white/30 font-mono">BFF</span>
+                <div className="pointer-events-auto w-[90vw] md:w-[380px] max-w-[380px] h-[550px] md:h-[650px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden animate-fade-in-up origin-bottom-right relative">
+
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-3 md:p-4 text-white flex justify-between items-center shrink-0 shadow-md relative z-10">
+                        {showHistory ? (
+                            <div className="flex items-center gap-2 w-full">
+                                <button onClick={() => setShowHistory(false)} className="text-white/80 hover:text-white p-1">←</button>
+                                <span className="font-bold">Lịch sử Chat</span>
                             </div>
-                            <p className="text-xs text-blue-100 opacity-80">Bạn học thân thiện • Online</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                            <div className="flex bg-blue-900/30 rounded-lg p-1 text-xs backdrop-blur-sm border border-white/10">
-                                <button onClick={() => { if (mode !== 'chat') { stopLive(); setMode('chat'); } }} className={`px-2 py-1 rounded-md transition-all font-medium ${mode === 'chat' ? 'bg-white text-blue-900 shadow-sm' : 'text-blue-100 hover:bg-white/10'}`}>Chat</button>
-                                <button onClick={() => setMode('live')} className={`px-2 py-1 rounded-md transition-all font-medium ${mode === 'live' ? 'bg-white text-blue-900 shadow-sm' : 'text-blue-100 hover:bg-white/10'}`}>Live</button>
-                            </div>
-                            {mode === 'chat' && (
-                                <button
-                                    onClick={() => setIsSpeakingMode(!isSpeakingMode)}
-                                    className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-full border transition-colors ${isSpeakingMode ? 'bg-green-500 text-white border-green-400' : 'bg-blue-800 text-blue-200 border-blue-700'}`}
-                                >
-                                    {isSpeakingMode ? '🎤 Mic ON' : '⌨️ Text'}
-                                </button>
-                            )}
-                        </div>
+                        ) : (
+                            <>
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                    <button onClick={() => setShowHistory(true)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors shrink-0" title="Lịch sử">
+                                        <span className="text-lg">☰</span>
+                                    </button>
+                                    <div className="min-w-0">
+                                        <div className="font-bold text-base md:text-lg flex items-center gap-2 truncate">
+                                            {getCurrentSession()?.title || 'Nana AI'}
+                                            <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full border border-white/30 font-mono shrink-0">BFF</span>
+                                        </div>
+                                        <p className="text-xs text-blue-100 opacity-80 truncate hidden sm:block">Bạn học thân thiện</p>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                    <div className="flex bg-blue-900/30 rounded-lg p-1 text-xs backdrop-blur-sm border border-white/10">
+                                        <button onClick={() => { if (mode !== 'chat') { stopLive(); setMode('chat'); } }} className={`px-2 py-1 rounded-md transition-all font-medium ${mode === 'chat' ? 'bg-white text-blue-900 shadow-sm' : 'text-blue-100 hover:bg-white/10'}`}>Chat</button>
+                                        <button onClick={() => setMode('live')} className={`px-2 py-1 rounded-md transition-all font-medium ${mode === 'live' ? 'bg-white text-blue-900 shadow-sm' : 'text-blue-100 hover:bg-white/10'}`}>Live</button>
+                                    </div>
+                                    {mode === 'chat' && (
+                                        <div className="flex gap-1">
+                                            <button
+                                                onClick={createNewSession}
+                                                className="text-[10px] px-2 py-0.5 rounded-full border bg-blue-800 text-blue-200 border-blue-700 hover:bg-blue-700 hover:text-white transition-colors"
+                                                title="Đoạn chat mới"
+                                            >
+                                                + Mới
+                                            </button>
+                                            <button
+                                                onClick={() => setIsSpeakingMode(!isSpeakingMode)}
+                                                className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-full border transition-colors ${isSpeakingMode ? 'bg-green-500 text-white border-green-400' : 'bg-blue-800 text-blue-200 border-blue-700'}`}
+                                            >
+                                                {isSpeakingMode ? '🎤 Mic' : '⌨️ Text'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
                     </div>
 
-                    {apiKeyMissing && (
+                    {apiKeyMissing && !showHistory && (
                         <div className="bg-yellow-50 p-3 text-xs text-yellow-800 text-center border-b border-yellow-100 flex items-center justify-center gap-2">
                             ⚠️ Chưa có API Key. <a href="/#/settings" className="underline font-bold" onClick={() => setIsOpen(false)}>Vào Cài Đặt</a>
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-y-auto p-3 md:p-4 bg-slate-50 scrollbar-thin scrollbar-thumb-gray-300 relative">
-                        {mode === 'chat' ? (
-                            <div className="space-y-4 pb-2">
-                                {messages.length > 5 && (
-                                    <div className="text-center">
-                                        <button onClick={clearHistory} className="text-[10px] text-gray-400 hover:text-red-500 underline bg-white px-2 py-1 rounded border border-gray-100 shadow-sm">
-                                            🗑 Xóa lịch sử
-                                        </button>
+                    {/* Body */}
+                    <div className="flex-1 overflow-hidden relative bg-slate-50">
+
+                        {/* History View (Overlay) */}
+                        {showHistory && (
+                            <div className="absolute inset-0 bg-white z-20 overflow-hidden flex flex-col animate-fade-in">
+                                {/* History Toolbar */}
+                                <div className="p-3 border-b border-gray-100 bg-gray-50 flex gap-2">
+                                    <div className="flex-1 relative">
+                                        <input
+                                            value={historySearch}
+                                            onChange={(e) => setHistorySearch(e.target.value)}
+                                            className="w-full pl-8 pr-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                                            placeholder="Tìm đoạn chat..."
+                                        />
+                                        <span className="absolute left-2.5 top-2 text-gray-400">🔍</span>
                                     </div>
-                                )}
-                                {messages.map((m, i) => (
-                                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                                        <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'}`}>
-                                            {m.role === 'user' ? (
-                                                <div className="whitespace-pre-wrap break-words">{m.text}</div>
-                                            ) : (
-                                                <>
-                                                    {m.isThinking && !m.text && (
-                                                        <div className="flex gap-1 items-center text-gray-400 text-xs italic">
-                                                            <span>Nana đang nghĩ</span>
-                                                            <span className="animate-bounce">.</span><span className="animate-bounce" style={{ animationDelay: '0.2s' }}>.</span><span className="animate-bounce" style={{ animationDelay: '0.4s' }}>.</span>
+                                    <button
+                                        onClick={createNewSession}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 rounded-xl font-bold text-xl shadow-sm transition-colors"
+                                        title="Tạo chat mới"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-2">
+                                    {Object.entries(groupedSessions).map(([label, group]) => group.length > 0 && (
+                                        <div key={label} className="mb-4">
+                                            <h5 className="px-3 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{label}</h5>
+                                            <div className="space-y-1">
+                                                {group.map(session => (
+                                                    <div
+                                                        key={session.id}
+                                                        onClick={() => selectSession(session.id)}
+                                                        className={`group p-3 rounded-xl cursor-pointer transition-all flex justify-between items-start border border-transparent hover:bg-gray-100 hover:border-gray-200 ${currentSessionId === session.id ? 'bg-blue-50 border-blue-100 ring-1 ring-blue-100' : 'bg-white'}`}
+                                                    >
+                                                        <div className="min-w-0 flex-1 pr-2">
+                                                            {editingSessionId === session.id ? (
+                                                                <form onSubmit={saveTitle} onClick={e => e.stopPropagation()}>
+                                                                    <input
+                                                                        autoFocus
+                                                                        value={editTitle}
+                                                                        onChange={e => setEditTitle(e.target.value)}
+                                                                        onBlur={() => saveTitle()}
+                                                                        className="w-full text-sm font-bold border-b border-blue-500 outline-none bg-transparent text-gray-800"
+                                                                    />
+                                                                </form>
+                                                            ) : (
+                                                                <h4 className={`font-bold text-sm truncate ${currentSessionId === session.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                                                                    {session.title || 'Không tên'}
+                                                                </h4>
+                                                            )}
+
+                                                            <p className="text-xs text-gray-500 mt-1 truncate opacity-80">
+                                                                {session.messages.length > 0 ? session.messages[session.messages.length - 1].text : 'Chưa có tin nhắn'}
+                                                            </p>
                                                         </div>
-                                                    )}
 
-                                                    <SimpleMarkdownRenderer content={m.text} />
-
-                                                    <div className="flex items-center justify-end gap-2 mt-2 border-t border-gray-100 pt-1">
-                                                        <button
-                                                            onClick={() => speechService.speak(m.text, voiceSettings)}
-                                                            className="text-gray-400 hover:text-blue-500 p-1 rounded hover:bg-gray-50 transition-colors"
-                                                            title="Nghe lại"
-                                                        >
-                                                            🔊
-                                                        </button>
+                                                        <div className="flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button onClick={(e) => startEditing(e, session)} className="text-gray-400 hover:text-blue-500 p-1" title="Đổi tên">✎</button>
+                                                            <button onClick={(e) => deleteSession(e, session.id)} className="text-gray-400 hover:text-red-500 p-1" title="Xóa">🗑</button>
+                                                        </div>
                                                     </div>
-
-                                                    {m.sources && m.sources.length > 0 && (
-                                                        <div className="mt-2 pt-2 border-t border-gray-100">
-                                                            <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Nguồn:</p>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {m.sources.map((src, idx) => (
-                                                                    <a
-                                                                        key={idx}
-                                                                        href={src.uri}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
-                                                                        className="text-[10px] bg-gray-100 hover:bg-blue-50 text-blue-600 border border-gray-200 px-2 py-1 rounded-lg truncate max-w-[150px] block transition-colors"
-                                                                    >
-                                                                        🔗 {src.title}
-                                                                    </a>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </>
-                                            )}
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
-                                <div ref={messagesEndRef} />
+                                    ))}
+
+                                    {sessions.length === 0 && (
+                                        <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                                            <span className="text-4xl mb-2">💬</span>
+                                            <p className="text-sm">Chưa có lịch sử chat.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Chat View */}
+                        {mode === 'chat' ? (
+                            <div className="h-full flex flex-col">
+                                <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300">
+                                    {currentMessages.map((m, i) => (
+                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                                            <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'}`}>
+                                                {m.role === 'user' ? (
+                                                    <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                                                ) : (
+                                                    <>
+                                                        {m.isThinking && !m.text && (
+                                                            <div className="flex gap-1 items-center text-gray-400 text-xs italic">
+                                                                <span>Nana đang nghĩ</span>
+                                                                <span className="animate-bounce">.</span><span className="animate-bounce" style={{ animationDelay: '0.2s' }}>.</span><span className="animate-bounce" style={{ animationDelay: '0.4s' }}>.</span>
+                                                            </div>
+                                                        )}
+
+                                                        <SimpleMarkdownRenderer content={m.text} />
+
+                                                        <div className="flex items-center justify-end gap-2 mt-2 border-t border-gray-100 pt-1">
+                                                            <button
+                                                                onClick={() => speechService.speak(m.text, voiceSettings)}
+                                                                className="text-gray-400 hover:text-blue-500 p-1 rounded hover:bg-gray-50 transition-colors"
+                                                                title="Nghe lại"
+                                                            >
+                                                                🔊
+                                                            </button>
+                                                        </div>
+
+                                                        {m.sources && m.sources.length > 0 && (
+                                                            <div className="mt-2 pt-2 border-t border-gray-100">
+                                                                <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Nguồn:</p>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {m.sources.map((src, idx) => (
+                                                                        <a
+                                                                            key={idx}
+                                                                            href={src.uri}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="text-[10px] bg-gray-100 hover:bg-blue-50 text-blue-600 border border-gray-200 px-2 py-1 rounded-lg truncate max-w-[150px] block transition-colors"
+                                                                        >
+                                                                            🔗 {src.title}
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <div ref={messagesEndRef} />
+                                </div>
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center h-full space-y-6 md:space-y-8 bg-white/50 rounded-xl m-2 border border-white/50">
@@ -516,7 +750,7 @@ export const ChatWidget: React.FC = () => {
                         )}
                     </div>
 
-                    {mode === 'chat' && (
+                    {mode === 'chat' && !showHistory && (
                         <div className="p-3 bg-white border-t border-gray-100 shrink-0">
                             {isSpeakingMode ? (
                                 <div className="flex items-center justify-center py-2">

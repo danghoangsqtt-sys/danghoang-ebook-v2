@@ -25,10 +25,8 @@ interface ErrorBoundaryState {
 }
 
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-    constructor(props: ErrorBoundaryProps) {
-        super(props);
-        this.state = { hasError: false };
-    }
+    state: ErrorBoundaryState = { hasError: false };
+
     static getDerivedStateFromError(error: any) {
         return { hasError: true };
     }
@@ -124,7 +122,7 @@ export const Settings: React.FC = () => {
         if (saved) {
             setVoiceSettings(JSON.parse(saved));
         } else {
-            // Smart default
+            // Smart default using new logic (Google Tiếng Việt prioritized)
             const defaultVoice = speechService.findBestVoice({ lang: 'vi-VN' });
             if (defaultVoice) {
                 setVoiceSettings(prev => ({ ...prev, voiceURI: defaultVoice.voiceURI }));
@@ -139,7 +137,7 @@ export const Settings: React.FC = () => {
     };
 
     const testVoice = () => {
-        speechService.speak("Hế lô! Nana đây. Giọng tớ nghe ổn không nè? Kaka!", voiceSettings);
+        speechService.speak("Hế lô! Nana đây. Giọng tớ nghe ổn không nè? Mình là người Hà Nội đấy nhé!", voiceSettings);
     };
 
     const fetchAssignedKey = async (uid: string) => {
@@ -292,6 +290,14 @@ export const Settings: React.FC = () => {
         }
     };
 
+    // Helper to identify preferred Northern voices
+    const isRecommendedVoice = (voice: SpeechSynthesisVoice) => {
+        return voice.name.includes('Google Tiếng Việt') ||
+            voice.name.includes('Google Vietnamese') ||
+            voice.name.includes('Microsoft HoaiMy') ||
+            voice.name.includes('Linh');
+    };
+
     const TabButton = ({ id, label, icon }: { id: typeof activeTab, label: string, icon: string }) => (
         <button
             onClick={() => setActiveTab(id)}
@@ -434,12 +440,14 @@ export const Settings: React.FC = () => {
                                                 {availableVoices.length === 0 && <option value="">Đang tải giọng đọc...</option>}
                                                 {availableVoices.map(v => (
                                                     <option key={v.voiceURI} value={v.voiceURI}>
-                                                        {v.name} ({v.lang}) {v.default ? '(Mặc định)' : ''}
+                                                        {v.name} ({v.lang})
+                                                        {v.default ? ' (Mặc định)' : ''}
+                                                        {isRecommendedVoice(v) ? ' ⭐ Khuyên dùng / Nữ Bắc' : ''}
                                                     </option>
                                                 ))}
                                             </select>
                                             <p className="text-xs text-gray-500 mt-1.5">
-                                                * Ưu tiên chọn các giọng "Google Vietnamese" để có chất lượng tốt nhất.
+                                                * Nana nói chuẩn giọng Nữ miền Bắc với "Google Tiếng Việt" hoặc "Microsoft HoaiMy".
                                             </p>
                                         </div>
 

@@ -37,6 +37,14 @@ const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
 const COMMON_CATEGORIES_EXPENSE = ['Ăn uống', 'Đi lại', 'Nhà cửa', 'Mua sắm', 'Giải trí', 'Y tế', 'Giáo dục', 'Tiện ích'];
 const COMMON_CATEGORIES_INCOME = ['Lương', 'Thưởng', 'Kinh doanh', 'Đầu tư', 'Được tặng', 'Khác'];
 
+// Extended list for Budget Creation
+const PREDEFINED_BUDGET_CATEGORIES = [
+    "Ăn uống", "Đi lại", "Nhà cửa", "Điện nước & Net",
+    "Mua sắm", "Giải trí", "Y tế", "Giáo dục",
+    "Làm đẹp", "Du lịch", "Trả góp", "Bảo hiểm",
+    "Tiết kiệm", "Đầu tư", "Khác"
+];
+
 const inputStyle = "w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 dark:bg-gray-700 dark:text-white dark:border-gray-600 transition-colors placeholder-gray-400 font-medium shadow-sm";
 
 export const Finance: React.FC = () => {
@@ -233,6 +241,47 @@ export const Finance: React.FC = () => {
             .reduce((sum, t) => sum + t.amount, 0);
     };
 
+    // --- Rollover Calculation Logic ---
+    const calculateRollover = (categoryName: string) => {
+        if (statsMode !== 'month') return 0; // Only applicable for monthly budgeting logic
+
+        // 1. Determine the Start Date (First ever transaction for this category)
+        // Note: In a more complex app, budgets would have a 'startDate'. Here we infer it or assume generic accumulation.
+        // To be safe and simple: We look at all historical transactions BEFORE the currently selected month.
+
+        const startOfCurrentMonth = new Date(filterDate.getFullYear(), filterDate.getMonth(), 1);
+
+        // Filter expense transactions for this category BEFORE this month
+        const historyTrans = transactions.filter(t =>
+            t.category.toLowerCase().trim() === categoryName.toLowerCase().trim() &&
+            t.type === 'expense' &&
+            new Date(t.date) < startOfCurrentMonth
+        );
+
+        if (historyTrans.length === 0) return 0; // No history, no rollover
+
+        // 2. Find the earliest date to start calculating the budget allowance
+        const timestamps = historyTrans.map(t => new Date(t.date).getTime());
+        const firstTransDate = new Date(Math.min(...timestamps));
+        const startMonth = new Date(firstTransDate.getFullYear(), firstTransDate.getMonth(), 1);
+
+        // 3. Calculate months passed: [Start Month ... Current Month - 1]
+        // Formula: (YearDiff * 12) + MonthDiff
+        const monthsPassed = (startOfCurrentMonth.getFullYear() - startMonth.getFullYear()) * 12 + (startOfCurrentMonth.getMonth() - startMonth.getMonth());
+
+        // 4. Ensure monthsPassed is at least 1 if there is history
+        if (monthsPassed <= 0) return 0;
+
+        // 5. Find the budget limit (Assuming fixed budget for simplicity in this version)
+        const budget = budgets.find(b => b.name.toLowerCase().trim() === categoryName.toLowerCase().trim());
+        if (!budget) return 0;
+
+        const totalAllocated = monthsPassed * budget.limit;
+        const totalSpent = historyTrans.reduce((sum, t) => sum + t.amount, 0);
+
+        return totalAllocated - totalSpent;
+    };
+
     // --- Helpers for Transaction Modal ---
     const getAvailableCategories = () => {
         if (newTrans.type === 'income') return COMMON_CATEGORIES_INCOME;
@@ -252,7 +301,28 @@ export const Finance: React.FC = () => {
         const budget = budgets.find(b => b.name.toLowerCase().trim() === newTrans.category?.toLowerCase().trim());
         if (!budget) return null;
 
-        const currentSpent = calculateBudgetSpent(budget.name);
+        // Use transaction date for calculation
+        const transDate = newTrans.date ? new Date(newTrans.date) : new Date();
+
+        // Need to consider rollover if the transaction date is in the current view (or recalculate logic for that specific month)
+        // For simplicity in preview, we stick to basic monthly limit check unless we build a complex forecaster.
+        // However, showing the *current month's* effective limit is better.
+
+        // Note: calculateRollover relies on 'filterDate'. Ideally we calculate for 'transDate'.
+        // We will skip complex rollover preview here to avoid confusion, just show basic monthly limit.
+
+        const currentSpent = transactions
+            .filter(t => {
+                const d = new Date(t.date);
+                const transCat = t.category.toLowerCase().trim();
+                const budgetCat = budget.name.toLowerCase().trim();
+                return t.type === 'expense' &&
+                    transCat === budgetCat &&
+                    d.getMonth() === transDate.getMonth() &&
+                    d.getFullYear() === transDate.getFullYear();
+            })
+            .reduce((sum, t) => sum + t.amount, 0);
+
         const addingAmount = Number(newTrans.amount) || 0;
         const newTotal = currentSpent + addingAmount;
         const percent = Math.min(100, (newTotal / budget.limit) * 100);
@@ -264,7 +334,8 @@ export const Finance: React.FC = () => {
             currentSpent,
             newTotal,
             percent,
-            isOver
+            isOver,
+            remaining: budget.limit - newTotal
         };
     };
 
@@ -317,24 +388,31 @@ export const Finance: React.FC = () => {
 
     // --- SUB COMPONENTS ---
     const OverviewTab = () => {
+        // Calculate Total Budget for the selected month view
+        const totalBudgetLimit = budgets.filter(b => b.type === 'expense').reduce((sum, b) => sum + b.limit, 0);
+        const budgetedSpent = budgets.filter(b => b.type === 'expense').reduce((sum, b) => {
+            return sum + calculateBudgetSpent(b.name);
+        }, 0);
+        const budgetHealthPercent = totalBudgetLimit > 0 ? (budgetedSpent / totalBudgetLimit) * 100 : 0;
+
         return (
             <div className="space-y-6 animate-fade-in">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-200 flex items-center gap-2">
-                        <button onClick={() => navigateDate(-1)} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">◀</button>
+                    <div className="bg-white dark:bg-gray-800 p-2 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex items-center gap-2">
+                        <button onClick={() => navigateDate(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300">◀</button>
                         <div className="text-center min-w-[160px]">
                             <p className="text-[10px] text-gray-400 uppercase font-bold">Thời gian</p>
-                            <h2 className="text-lg font-bold text-gray-800">
+                            <h2 className="text-lg font-bold text-gray-800 dark:text-white">
                                 {statsMode === 'month' ? `Tháng ${filterDate.getMonth() + 1}, ${filterDate.getFullYear()}` : `Năm ${filterDate.getFullYear()}`}
                             </h2>
                         </div>
-                        <button onClick={() => navigateDate(1)} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">▶</button>
+                        <button onClick={() => navigateDate(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300">▶</button>
                     </div>
 
                     <div className="flex gap-2">
-                        <div className="flex bg-gray-100 p-1 rounded-xl">
-                            <button onClick={() => setStatsMode('month')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-all ${statsMode === 'month' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>Tháng</button>
-                            <button onClick={() => setStatsMode('year')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-all ${statsMode === 'year' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>Năm</button>
+                        <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl">
+                            <button onClick={() => setStatsMode('month')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-all ${statsMode === 'month' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Tháng</button>
+                            <button onClick={() => setStatsMode('year')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-all ${statsMode === 'year' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Năm</button>
                         </div>
                         <button
                             onClick={handleAIAnalysis}
@@ -381,6 +459,25 @@ export const Finance: React.FC = () => {
                     </div>
                 </div>
 
+                {/* Budget Health Summary (Only in Month View) */}
+                {statsMode === 'month' && totalBudgetLimit > 0 && (
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between animate-fade-in">
+                        <div>
+                            <p className="text-xs text-gray-500 uppercase font-bold">Tiến độ Ngân sách (Tất cả)</p>
+                            <div className="flex items-baseline gap-2">
+                                <h3 className="text-xl font-bold text-gray-800 dark:text-white">{formatCurrency(budgetedSpent)}</h3>
+                                <span className="text-xs text-gray-400">/ {formatCurrency(totalBudgetLimit)} (Gốc)</span>
+                            </div>
+                        </div>
+                        <div className="flex-1 mx-4 max-w-xs">
+                            <div className="h-2.5 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all duration-500 ${budgetHealthPercent > 100 ? 'bg-red-500' : budgetHealthPercent > 80 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, budgetHealthPercent)}%` }}></div>
+                            </div>
+                            <p className="text-[10px] text-right mt-1 text-gray-500">{budgetHealthPercent.toFixed(1)}%</p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Quick Actions */}
                 <div className="grid grid-cols-2 gap-4">
                     <button
@@ -399,20 +496,20 @@ export const Finance: React.FC = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Bar Chart */}
-                    <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="font-bold text-gray-800 mb-6 text-lg flex items-center gap-2">
+                    <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                        <h3 className="font-bold text-gray-800 dark:text-white mb-6 text-lg flex items-center gap-2">
                             <span>📊</span> Biến động thu chi
                         </h3>
                         <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={getBarChartData()} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" opacity={0.2} />
                                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} dy={10} />
                                     <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(val) => val >= 1000000 ? `${(val / 1000000).toFixed(1)}M` : `${val / 1000}k`} />
                                     <Tooltip
                                         formatter={(value) => formatCurrency(Number(value))}
                                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                                        cursor={{ fill: '#f9fafb' }}
+                                        cursor={{ fill: '#f9fafb', opacity: 0.1 }}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
                                     <Bar dataKey="income" name="Thu nhập" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={40} />
@@ -423,8 +520,8 @@ export const Finance: React.FC = () => {
                     </div>
 
                     {/* Pie Chart */}
-                    <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="font-bold text-gray-800 mb-6 text-lg flex items-center gap-2">
+                    <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                        <h3 className="font-bold text-gray-800 dark:text-white mb-6 text-lg flex items-center gap-2">
                             <span>🍰</span> Cơ cấu chi tiêu
                         </h3>
                         <div className="h-64">
@@ -447,7 +544,7 @@ export const Finance: React.FC = () => {
                                     </PieChart>
                                 </ResponsiveContainer>
                             ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+                                <div className="flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50 dark:bg-gray-900/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
                                     <span className="text-4xl mb-2">📉</span>
                                     <span className="text-sm font-medium">Chưa có dữ liệu chi tiêu</span>
                                 </div>
@@ -456,7 +553,6 @@ export const Finance: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Replaced simple list with new Paginated List Component */}
                 <TransactionList
                     uid={currentUser?.uid}
                     refreshTrigger={refreshTrigger}
@@ -499,55 +595,109 @@ export const Finance: React.FC = () => {
             else setBudgets(prev => prev.filter(b => b.id !== id));
         };
 
-        const totalBudget = budgets.reduce((acc, b) => acc + b.limit, 0);
-        const totalSpent = budgets.reduce((acc, b) => acc + calculateBudgetSpent(b.name), 0);
-        const overallPercent = totalBudget > 0 ? Math.min(100, (totalSpent / totalBudget) * 100) : 0;
+        // Calculate effective budget metrics
+        const budgetMetrics = budgets.map(b => {
+            const rollover = calculateRollover(b.name);
+            const effectiveLimit = b.limit + rollover;
+            const spent = calculateBudgetSpent(b.name);
+            return {
+                ...b,
+                rollover,
+                effectiveLimit,
+                spent
+            };
+        });
+
+        const totalEffectiveBudget = budgetMetrics.reduce((acc, b) => acc + (b.effectiveLimit > 0 ? b.effectiveLimit : 0), 0);
+        const totalSpent = budgetMetrics.reduce((acc, b) => acc + b.spent, 0);
+        const overallPercent = totalEffectiveBudget > 0 ? Math.min(100, (totalSpent / totalEffectiveBudget) * 100) : 0;
 
         return (
             <div className="space-y-6 animate-fade-in">
+                {/* Summary Card */}
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
                     <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                         <div>
-                            <p className="text-blue-100 font-bold uppercase text-xs tracking-wider mb-1">Tổng Ngân Sách (Tháng)</p>
-                            <h2 className="text-3xl md:text-4xl font-bold">{formatCurrency(totalBudget - totalSpent)}</h2>
+                            <p className="text-blue-100 font-bold uppercase text-xs tracking-wider mb-1">Tổng Hạn Mức Thực Tế (Tháng này)</p>
+                            <h2 className="text-3xl md:text-4xl font-bold">{formatCurrency(Math.max(0, totalEffectiveBudget - totalSpent))}</h2>
+                            <p className="text-xs text-blue-200 mt-2">Đã bao gồm cộng dồn từ tháng trước</p>
                         </div>
                         <div className="w-full md:w-1/2 bg-black/20 rounded-xl p-4 backdrop-blur-sm border border-white/10">
                             <div className="flex justify-between text-sm font-bold mb-2"><span>Tiến độ chi tiêu</span><span>{overallPercent.toFixed(1)}%</span></div>
                             <div className="w-full bg-white/20 h-3 rounded-full overflow-hidden">
                                 <div className={`h-full rounded-full transition-all duration-1000 ease-out ${overallPercent > 90 ? 'bg-red-400' : overallPercent > 70 ? 'bg-yellow-400' : 'bg-green-400'}`} style={{ width: `${overallPercent}%` }}></div>
                             </div>
-                            <div className="flex justify-between text-xs text-blue-100 mt-2"><span>Đã dùng: {formatCurrency(totalSpent)}</span><span>Tổng: {formatCurrency(totalBudget)}</span></div>
+                            <div className="flex justify-between text-xs text-blue-100 mt-2"><span>Đã dùng: {formatCurrency(totalSpent)}</span><span>Tổng: {formatCurrency(totalEffectiveBudget)}</span></div>
                         </div>
                     </div>
                 </div>
 
                 <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-gray-800 text-lg">Danh sách ngân sách</h3>
-                    <button onClick={() => { resetForm(); setBudgetModalOpen(true); }} className="bg-white text-blue-600 border border-blue-200 px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-50 shadow-sm transition-all flex items-center gap-2"><span>+</span> Tạo ngân sách</button>
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-gray-800 dark:text-white text-lg">Danh sách ngân sách</h3>
+                        <div className="text-[10px] bg-gray-100 dark:bg-gray-800 text-gray-500 px-2 py-1 rounded flex items-center gap-1">
+                            <span>ℹ️</span> <span>Có cộng dồn</span>
+                        </div>
+                    </div>
+                    <button onClick={() => { resetForm(); setBudgetModalOpen(true); }} className="bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-50 dark:hover:bg-gray-700 shadow-sm transition-all flex items-center gap-2"><span>+</span> Tạo ngân sách</button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {budgets.map(b => {
-                        const spent = calculateBudgetSpent(b.name);
-                        const percent = Math.min((spent / b.limit) * 100, 100);
-                        const isOver = spent > b.limit;
+                    {budgetMetrics.map(b => {
+                        const { spent, limit, rollover, effectiveLimit } = b;
+
+                        // Calculate Percent based on Effective Limit
+                        // If effectiveLimit is negative or zero (due to huge deficit), treating as 100% spent/over
+                        const percent = effectiveLimit > 0 ? Math.min((spent / effectiveLimit) * 100, 100) : 100;
+                        const isOver = spent > effectiveLimit;
+                        const isDeficit = effectiveLimit <= 0;
+
                         return (
-                            <div key={b.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all group relative">
+                            <div key={b.id} className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-md transition-all group relative">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl ${b.type === 'investment' ? 'bg-purple-100 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{getCategoryIcon(b.name)}</div>
-                                        <div><h4 className="font-bold text-gray-800">{b.name}</h4><p className="text-xs text-gray-500">{b.type === 'investment' ? 'Đầu tư' : 'Chi tiêu'}</p></div>
+                                        <div>
+                                            <h4 className="font-bold text-gray-800 dark:text-white">{b.name}</h4>
+                                            <div className="flex flex-col">
+                                                <p className="text-[10px] text-gray-400">Gốc: {formatCurrency(limit)}</p>
+                                                {rollover !== 0 && (
+                                                    <p className={`text-[10px] font-bold ${rollover > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                        {rollover > 0 ? '+' : ''}{formatCurrency(rollover)} (Trước)
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => { setBudgetName(b.name); setBudgetLimit(b.limit); setBudgetType(b.type); setEditingBudget(b); setBudgetModalOpen(true); }} className="p-1.5 hover:bg-gray-100 rounded text-gray-500">✏️</button>
-                                        <button onClick={() => deleteBudget(b.id)} className="p-1.5 hover:bg-red-50 hover:text-red-500 rounded text-gray-500">🗑</button>
+                                        <button onClick={() => { setBudgetName(b.name); setBudgetLimit(b.limit); setBudgetType(b.type); setEditingBudget(b); setBudgetModalOpen(true); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500">✏️</button>
+                                        <button onClick={() => deleteBudget(b.id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 rounded text-gray-500">🗑</button>
                                     </div>
                                 </div>
+
                                 <div className="mb-4">
-                                    <div className="flex items-end gap-1 mb-1"><span className={`text-2xl font-bold ${isOver ? 'text-red-600' : 'text-gray-800'}`}>{formatCurrency(spent)}</span><span className="text-xs text-gray-400 font-medium mb-1.5">/ {formatCurrency(b.limit)}</span></div>
-                                    <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${percent > 90 ? 'bg-red-500' : percent > 75 ? 'bg-orange-400' : 'bg-green-500'}`} style={{ width: `${percent}%` }}></div></div>
+                                    <div className="flex items-end gap-1 mb-1">
+                                        <span className={`text-2xl font-bold ${isOver || isDeficit ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>{formatCurrency(spent)}</span>
+                                        <span className="text-xs text-gray-400 font-medium mb-1.5">
+                                            / {isDeficit ? '0đ (Âm vốn)' : formatCurrency(effectiveLimit)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-2.5 rounded-full overflow-hidden relative">
+                                        <div className={`h-full rounded-full transition-all duration-500 ${percent > 90 || isDeficit ? 'bg-red-500' : percent > 75 ? 'bg-orange-400' : 'bg-green-500'}`} style={{ width: `${percent}%` }}></div>
+                                    </div>
                                 </div>
-                                <div className="flex justify-between items-center text-xs font-medium"><span className={`${isOver ? 'text-red-600 bg-red-50' : 'text-gray-600 bg-gray-50'} px-2 py-1 rounded`}>{isOver ? `Vượt ${formatCurrency(spent - b.limit)}` : `Còn ${formatCurrency(b.limit - spent)}`}</span><span className="text-gray-400">{percent.toFixed(0)}%</span></div>
+
+                                <div className="flex justify-between items-center text-xs font-medium">
+                                    <span className={`${(isOver || isDeficit) ? 'text-red-600 bg-red-50 dark:bg-red-900/20' : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700'} px-2 py-1 rounded`}>
+                                        {isDeficit
+                                            ? `Thiếu hụt ${formatCurrency(Math.abs(effectiveLimit) + spent)}`
+                                            : isOver
+                                                ? `Vượt ${formatCurrency(spent - effectiveLimit)}`
+                                                : `Còn ${formatCurrency(effectiveLimit - spent)}`
+                                        }
+                                    </span>
+                                    <span className="text-gray-400">{isDeficit ? '>100%' : `${percent.toFixed(0)}%`}</span>
+                                </div>
                             </div>
                         );
                     })}
@@ -555,11 +705,36 @@ export const Finance: React.FC = () => {
 
                 {isBudgetModalOpen && (
                     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up">
-                            <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="font-bold text-lg text-gray-800">{editingBudget ? 'Chỉnh sửa' : 'Tạo mới'}</h3><button onClick={() => setBudgetModalOpen(false)} className="text-gray-400">✕</button></div>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up border border-gray-200 dark:border-gray-700">
+                            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
+                                <h3 className="font-bold text-lg text-gray-800 dark:text-white">{editingBudget ? 'Chỉnh sửa' : 'Tạo mới'}</h3>
+                                <button onClick={() => setBudgetModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+                            </div>
                             <div className="p-6 space-y-4">
-                                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tên danh mục</label><input type="text" value={budgetName} onChange={e => setBudgetName(e.target.value)} className={inputStyle} placeholder="Ví dụ: Ăn uống" /></div>
-                                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Hạn mức (VNĐ)</label><MoneyInput value={budgetLimit} onChange={setBudgetLimit} className={inputStyle} /></div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tên danh mục</label>
+                                    {/* Quick Select Dropdown */}
+                                    <select
+                                        className="w-full mb-2 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 outline-none"
+                                        onChange={(e) => { if (e.target.value) setBudgetName(e.target.value); }}
+                                        value=""
+                                    >
+                                        <option value="" disabled>-- Chọn danh mục mẫu --</option>
+                                        {PREDEFINED_BUDGET_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <input
+                                        type="text"
+                                        value={budgetName}
+                                        onChange={e => setBudgetName(e.target.value)}
+                                        className={inputStyle}
+                                        placeholder="Hoặc tự nhập tên..."
+                                    />
+                                </div>
+                                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Hạn mức gốc/tháng (VNĐ)</label><MoneyInput value={budgetLimit} onChange={setBudgetLimit} className={inputStyle} /></div>
+                                <div className="flex gap-2 pt-2">
+                                    <button type="button" onClick={() => setBudgetType('expense')} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${budgetType === 'expense' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'border-gray-200 text-gray-500'}`}>Chi tiêu</button>
+                                    <button type="button" onClick={() => setBudgetType('investment')} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${budgetType === 'investment' ? 'bg-purple-50 border-purple-200 text-purple-600' : 'border-gray-200 text-gray-500'}`}>Đầu tư</button>
+                                </div>
                                 <button onClick={handleSaveBudget} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg mt-2">Lưu</button>
                             </div>
                         </div>
@@ -639,36 +814,36 @@ export const Finance: React.FC = () => {
                 </div>
 
                 <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-gray-800 text-lg">Mục tiêu của bạn</h3>
-                    <button onClick={() => { resetForm(); setGoalModalOpen(true); }} className="bg-white text-emerald-600 border border-emerald-200 px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-50 flex items-center gap-2"><span>+</span> Thêm</button>
+                    <h3 className="font-bold text-gray-800 dark:text-white text-lg">Mục tiêu của bạn</h3>
+                    <button onClick={() => { resetForm(); setGoalModalOpen(true); }} className="bg-white dark:bg-gray-800 text-emerald-600 border border-emerald-200 dark:border-emerald-800 px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex items-center gap-2"><span>+</span> Thêm</button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {goals.map(g => {
                         const pct = Math.min((g.currentAmount / g.targetAmount) * 100, 100);
                         return (
-                            <div key={g.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 relative group hover:shadow-md transition-all">
+                            <div key={g.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-5 relative group hover:shadow-md transition-all">
                                 <div className="flex justify-between items-start mb-3">
                                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${g.color || 'bg-blue-500'}`}>
                                         {g.type === 'savings' ? '🐷' : g.type === 'investment' ? '📈' : '🏠'}
                                     </div>
                                     <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                                        <button onClick={() => { setName(g.name); setTarget(g.targetAmount); setCurrent(g.currentAmount); setDeadline(g.deadline || ''); setGoalType(g.type); setColor(g.color || 'bg-blue-500'); setEditingGoal(g); setGoalModalOpen(true); }} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-500">✏️</button>
-                                        <button onClick={() => deleteGoal(g.id)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-red-500">🗑️</button>
+                                        <button onClick={() => { setName(g.name); setTarget(g.targetAmount); setCurrent(g.currentAmount); setDeadline(g.deadline || ''); setGoalType(g.type); setColor(g.color || 'bg-blue-500'); setEditingGoal(g); setGoalModalOpen(true); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-blue-500">✏️</button>
+                                        <button onClick={() => deleteGoal(g.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-red-500">🗑️</button>
                                     </div>
                                 </div>
-                                <h3 className="font-bold text-lg text-gray-800 mb-1 truncate">{g.name}</h3>
-                                <div className="flex justify-between text-xs text-gray-500 mb-4">
+                                <h3 className="font-bold text-lg text-gray-800 dark:text-white mb-1 truncate">{g.name}</h3>
+                                <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-4">
                                     <span>Đích: {formatCurrency(g.targetAmount)}</span>
                                 </div>
-                                <div className="w-full bg-gray-100 rounded-full h-2.5 mb-2 overflow-hidden">
+                                <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2.5 mb-2 overflow-hidden">
                                     <div className={`h-full rounded-full transition-all duration-1000 ${g.color || 'bg-blue-500'}`} style={{ width: `${pct}%` }}></div>
                                 </div>
                                 <div className="flex justify-between items-center mb-5">
-                                    <span className="text-sm font-bold text-gray-700">{formatCurrency(g.currentAmount)}</span>
+                                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{formatCurrency(g.currentAmount)}</span>
                                     <span className="text-xs font-bold text-gray-400">{pct.toFixed(1)}%</span>
                                 </div>
-                                <button onClick={() => { setDepositModal({ isOpen: true, goalId: g.id }); }} className="w-full py-2 rounded-xl bg-gray-50 hover:bg-emerald-50 text-gray-600 hover:text-emerald-600 font-bold text-sm border border-gray-200 transition-colors flex items-center justify-center gap-2"><span>➕</span> Nạp tiền</button>
+                                <button onClick={() => { setDepositModal({ isOpen: true, goalId: g.id }); }} className="w-full py-2 rounded-xl bg-gray-50 dark:bg-gray-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-gray-600 dark:text-gray-300 hover:text-emerald-600 font-bold text-sm border border-gray-200 dark:border-gray-600 transition-colors flex items-center justify-center gap-2"><span>➕</span> Nạp tiền</button>
                             </div>
                         )
                     })}
@@ -676,8 +851,8 @@ export const Finance: React.FC = () => {
 
                 {isGoalModalOpen && (
                     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up">
-                            <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="font-bold text-lg text-gray-800">{editingGoal ? 'Sửa mục tiêu' : 'Mục tiêu mới'}</h3><button onClick={() => setGoalModalOpen(false)} className="text-gray-400">✕</button></div>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up border border-gray-200 dark:border-gray-700">
+                            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900"><h3 className="font-bold text-lg text-gray-800 dark:text-white">{editingGoal ? 'Sửa mục tiêu' : 'Mục tiêu mới'}</h3><button onClick={() => setGoalModalOpen(false)} className="text-gray-400">✕</button></div>
                             <div className="p-6 space-y-4">
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tên mục tiêu</label><input value={name} onChange={e => setName(e.target.value)} className={inputStyle} /></div>
                                 <div className="grid grid-cols-2 gap-4">
@@ -692,12 +867,12 @@ export const Finance: React.FC = () => {
 
                 {depositModal.isOpen && (
                     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden animate-fade-in-up">
-                            <div className="p-4 border-b border-gray-100 text-center"><h3 className="font-bold text-lg text-gray-800">Nạp thêm tiền</h3></div>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden animate-fade-in-up border border-gray-200 dark:border-gray-700">
+                            <div className="p-4 border-b border-gray-100 dark:border-gray-700 text-center bg-gray-50 dark:bg-gray-900"><h3 className="font-bold text-lg text-gray-800 dark:text-white">Nạp thêm tiền</h3></div>
                             <div className="p-6 space-y-4">
                                 <MoneyInput value={depositAmount} onChange={setDepositAmount} className={`${inputStyle} text-center text-xl font-bold`} placeholder="Số tiền" autoFocus />
                                 <button onClick={handleDeposit} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 shadow-lg">Xác nhận</button>
-                                <button onClick={() => { setDepositModal({ isOpen: false, goalId: null }); setDepositAmount(0); }} className="w-full text-gray-500 text-sm font-medium hover:text-gray-800">Hủy bỏ</button>
+                                <button onClick={() => { setDepositModal({ isOpen: false, goalId: null }); setDepositAmount(0); }} className="w-full text-gray-500 text-sm font-medium hover:text-gray-800 dark:hover:text-white">Hủy bỏ</button>
                             </div>
                         </div>
                     </div>
@@ -762,9 +937,9 @@ export const Finance: React.FC = () => {
         return (
             <div className="space-y-6 animate-fade-in">
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div className="flex bg-gray-100 p-1 rounded-xl">
+                    <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
                         {[{ id: 'ALL', l: 'Tất cả' }, { id: 'RECEIVABLE', l: 'Phải thu' }, { id: 'PAYABLE', l: 'Phải trả' }, { id: 'PAID', l: 'Đã xong' }].map(f => (
-                            <button key={f.id} onClick={() => setFilterStatus(f.id as any)} className={`px-4 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${filterStatus === f.id ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>{f.l}</button>
+                            <button key={f.id} onClick={() => setFilterStatus(f.id as any)} className={`px-4 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${filterStatus === f.id ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'}`}>{f.l}</button>
                         ))}
                     </div>
                     <button onClick={() => { resetForm(); setDebtModalOpen(true); }} className="w-full md:w-auto bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-md hover:bg-blue-700 flex items-center justify-center gap-2"><span>+</span> Thêm</button>
@@ -772,34 +947,34 @@ export const Finance: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredDebts.map(d => (
-                        <div key={d.id} className={`relative bg-white p-5 rounded-2xl shadow-sm border-l-4 hover:shadow-md transition-all group ${d.type === 'receivable' ? 'border-l-green-500' : 'border-l-red-500'} ${d.isPaid ? 'opacity-70 bg-gray-50' : ''}`}>
+                        <div key={d.id} className={`relative bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border-l-4 hover:shadow-md transition-all group ${d.type === 'receivable' ? 'border-l-green-500' : 'border-l-red-500'} ${d.isPaid ? 'opacity-70 bg-gray-50 dark:bg-gray-900' : ''}`}>
                             <div className="flex justify-between items-start mb-2">
                                 <div>
                                     <div className="flex items-center gap-2">
-                                        <h4 className={`font-bold text-lg ${d.isPaid ? 'text-gray-500 line-through' : 'text-gray-800'}`}>{d.personName}</h4>
-                                        {d.isPaid && <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded font-bold">Đã xong</span>}
+                                        <h4 className={`font-bold text-lg ${d.isPaid ? 'text-gray-500 line-through' : 'text-gray-800 dark:text-white'}`}>{d.personName}</h4>
+                                        {d.isPaid && <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-bold">Đã xong</span>}
                                     </div>
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded mt-1 inline-block ${d.type === 'receivable' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded mt-1 inline-block ${d.type === 'receivable' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>
                                         {d.type === 'receivable' ? 'Phải thu 📥' : 'Phải trả 📤'}
                                     </span>
                                 </div>
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-white/80 backdrop-blur-sm rounded">
-                                    <button onClick={() => { setDName(d.personName); setDAmount(d.amount); setDType(d.type); setDDueDate(d.dueDate || ''); setDNote(d.note || ''); setEditingDebt(d); setDebtModalOpen(true); }} className="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-blue-500">✏️</button>
-                                    <button onClick={() => deleteDebt(d.id)} className="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-red-500">🗑</button>
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded">
+                                    <button onClick={() => { setDName(d.personName); setDAmount(d.amount); setDType(d.type); setDDueDate(d.dueDate || ''); setDNote(d.note || ''); setEditingDebt(d); setDebtModalOpen(true); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 hover:text-blue-500">✏️</button>
+                                    <button onClick={() => deleteDebt(d.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 hover:text-red-500">🗑</button>
                                 </div>
                             </div>
                             <div className="flex items-end gap-1 mb-3"><span className={`text-2xl font-bold ${d.type === 'receivable' ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(d.amount)}</span></div>
-                            <button onClick={() => togglePaid(d)} className={`w-full mt-4 py-2 rounded-lg text-xs font-bold border transition-colors ${d.isPaid ? 'bg-gray-100 text-gray-500 border-gray-200' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}>{d.isPaid ? 'Hoàn tác' : 'Đánh dấu đã xong ✅'}</button>
+                            <button onClick={() => togglePaid(d)} className={`w-full mt-4 py-2 rounded-lg text-xs font-bold border transition-colors ${d.isPaid ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 border-gray-200 dark:border-gray-600' : 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-gray-600'}`}>{d.isPaid ? 'Hoàn tác' : 'Đánh dấu đã xong ✅'}</button>
                         </div>
                     ))}
                 </div>
 
                 {isDebtModalOpen && (
                     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up">
-                            <div className="p-5 border-b border-gray-100 flex justify-between items-center"><h3 className="font-bold text-lg text-gray-800">{editingDebt ? 'Chỉnh sửa' : 'Thêm khoản nợ'}</h3><button onClick={() => setDebtModalOpen(false)} className="text-gray-400">✕</button></div>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up border border-gray-200 dark:border-gray-700">
+                            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900"><h3 className="font-bold text-lg text-gray-800 dark:text-white">{editingDebt ? 'Chỉnh sửa' : 'Thêm khoản nợ'}</h3><button onClick={() => setDebtModalOpen(false)} className="text-gray-400">✕</button></div>
                             <div className="p-6 space-y-4">
-                                <div className="flex bg-gray-100 p-1 rounded-xl"><button onClick={() => setDType('receivable')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${dType === 'receivable' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Phải Thu</button><button onClick={() => setDType('payable')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${dType === 'payable' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'}`}>Phải Trả</button></div>
+                                <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl"><button onClick={() => setDType('receivable')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${dType === 'receivable' ? 'bg-white dark:bg-gray-600 text-green-600 dark:text-green-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Phải Thu</button><button onClick={() => setDType('payable')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${dType === 'payable' ? 'bg-white dark:bg-gray-600 text-red-600 dark:text-red-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Phải Trả</button></div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tên người / Đơn vị</label><input value={dName} onChange={e => setDName(e.target.value)} className={inputStyle} autoFocus /></div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Số tiền</label><MoneyInput value={dAmount} onChange={setDAmount} className={inputStyle} /></div>
                                 <button onClick={handleSaveDebt} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg mt-2">Lưu</button>
@@ -839,10 +1014,10 @@ export const Finance: React.FC = () => {
             </div>
             {isTransModalOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-fade-in-up">
-                        <div className="p-4 border-b flex justify-between items-center"><h3 className="font-bold text-lg text-gray-800">Thêm Giao Dịch</h3><button onClick={() => setTransModalOpen(false)} className="text-gray-500">✕</button></div>
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md animate-fade-in-up border border-gray-200 dark:border-gray-700">
+                        <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900"><h3 className="font-bold text-lg text-gray-800 dark:text-white">Thêm Giao Dịch</h3><button onClick={() => setTransModalOpen(false)} className="text-gray-500">✕</button></div>
                         <div className="p-4 md:p-6 space-y-4">
-                            <div className="flex bg-gray-100 p-1 rounded-xl"><button onClick={() => setNewTrans({ ...newTrans, type: 'income', category: '' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Thu Nhập</button><button onClick={() => setNewTrans({ ...newTrans, type: 'expense', category: '' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'}`}>Chi Tiêu</button></div>
+                            <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl"><button onClick={() => setNewTrans({ ...newTrans, type: 'income', category: '' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'income' ? 'bg-white dark:bg-gray-600 text-green-600 dark:text-green-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Thu Nhập</button><button onClick={() => setNewTrans({ ...newTrans, type: 'expense', category: '' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'expense' ? 'bg-white dark:bg-gray-600 text-red-600 dark:text-red-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Chi Tiêu</button></div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Số tiền</label>
                                 <MoneyInput value={newTrans.amount || 0} onChange={(val) => setNewTrans({ ...newTrans, amount: val })} className={inputStyle} placeholder="0" autoFocus />
@@ -857,20 +1032,20 @@ export const Finance: React.FC = () => {
 
                             {/* Budget Preview Box */}
                             {budgetPreview && (
-                                <div className={`rounded-lg p-3 text-xs border ${budgetPreview.isOver ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+                                <div className={`rounded-lg p-3 text-xs border ${budgetPreview.isOver ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300'}`}>
                                     <div className="flex justify-between font-bold mb-1">
-                                        <span>{budgetPreview.name}</span>
+                                        <span>Ngân sách: {budgetPreview.name}</span>
                                         <span>{budgetPreview.percent.toFixed(0)}%</span>
                                     </div>
                                     <div className="w-full bg-white/50 h-1.5 rounded-full overflow-hidden mb-1">
                                         <div className={`h-full rounded-full ${budgetPreview.isOver ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${budgetPreview.percent}%` }}></div>
                                     </div>
                                     <div className="flex justify-between opacity-80">
-                                        <span>Đã dùng: {formatCurrency(budgetPreview.currentSpent)}</span>
+                                        <span>Đã dùng (kể cả đơn này): {formatCurrency(budgetPreview.newTotal)}</span>
                                         <span>Hạn mức: {formatCurrency(budgetPreview.limit)}</span>
                                     </div>
                                     {budgetPreview.newTotal > budgetPreview.limit && (
-                                        <p className="text-red-600 font-bold mt-1">⚠️ Sẽ vượt hạn mức {formatCurrency(budgetPreview.newTotal - budgetPreview.limit)}</p>
+                                        <p className="text-red-600 font-bold mt-1">⚠️ Bạn sẽ vượt ngân sách {formatCurrency(Math.abs(budgetPreview.remaining))}</p>
                                     )}
                                 </div>
                             )}

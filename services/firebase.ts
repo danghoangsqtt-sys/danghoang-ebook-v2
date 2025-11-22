@@ -50,6 +50,29 @@ class FirebaseService {
         console.log("✅ Firebase Service Initialized (v12.6.0 Compatible)");
     }
 
+    // --- UTILS ---
+    // Firestore doesn't support 'undefined', this recursively converts undefined to null or strips it
+    private sanitizeForFirestore(obj: any): any {
+        if (obj === undefined) return null;
+        if (obj === null || typeof obj !== 'object') return obj;
+        if (obj instanceof Date) return obj; // Firestore handles Dates
+
+        if (Array.isArray(obj)) {
+            return obj.map(v => this.sanitizeForFirestore(v));
+        }
+
+        const newObj: any = {};
+        for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                const val = this.sanitizeForFirestore(obj[key]);
+                // Option: Skip undefined keys entirely to save space, or set to null. 
+                // Setting to null preserves structure.
+                newObj[key] = val;
+            }
+        }
+        return newObj;
+    }
+
     async loginWithGoogle(): Promise<{ user: firebase.User, token?: string, apiKey?: string } | null> {
         const provider = new firebase.auth.GoogleAuthProvider();
         provider.addScope('https://www.googleapis.com/auth/calendar');
@@ -231,8 +254,10 @@ class FirebaseService {
 
     async saveUserData(moduleName: string, data: any) {
         const localKey = `dh_${moduleName}`;
+        const sanitizedData = this.sanitizeForFirestore(data);
+
         // Always save local first (Guest Mode compatible)
-        localStorage.setItem(localKey, JSON.stringify(data));
+        localStorage.setItem(localKey, JSON.stringify(sanitizedData));
 
         // Save to Cloud ONLY if authorized
         if (this.currentUser) {
@@ -240,7 +265,7 @@ class FirebaseService {
             if (isAuth) {
                 try {
                     await this.db.collection("users").doc(this.currentUser.uid).collection("modules").doc(moduleName).set({
-                        data,
+                        data: sanitizedData,
                         updatedAt: Date.now(),
                         module: moduleName
                     }, { merge: true });
@@ -283,8 +308,9 @@ class FirebaseService {
     }
 
     async saveCourseTree(tree: CourseNode[]) {
+        const sanitizedTree = this.sanitizeForFirestore(tree);
         try {
-            localStorage.setItem('dh_course_tree_v2', JSON.stringify(tree));
+            localStorage.setItem('dh_course_tree_v2', JSON.stringify(sanitizedTree));
         } catch (e) {
             console.warn("LocalStorage full", e);
         }
@@ -292,7 +318,7 @@ class FirebaseService {
         // Only Admin can update the public course tree
         if (this.auth.currentUser?.email === this.ADMIN_EMAIL) {
             try {
-                await this.db.collection("data").doc("courseTree").set({ tree });
+                await this.db.collection("data").doc("courseTree").set({ tree: sanitizedTree });
             } catch (error) {
                 console.error("Error saving course tree:", error);
             }
@@ -310,6 +336,66 @@ class FirebaseService {
         }
         const localData = localStorage.getItem('dh_course_tree_v2');
         return localData ? JSON.parse(localData) : null;
+    }
+
+    // --- Global Stats Aggregation ---
+    async getGlobalStats(uid: string) {
+        // Initialize defaults
+        let financeBalance = 0;
+        let vocabCount = 0;
+        let pendingTasks = 0;
+        let activeHabits = 0;
+        let habitStreak = 0;
+
+        try {
+            // 1. Finance: Sum transactions (Income - Expense)
+            // NOTE: This reads docs. In production, use a 'stats' doc.
+            const transSnap = await this.db.collection('users').doc(uid).collection('finance_transactions').get();
+            if (!transSnap.empty) {
+                transSnap.forEach(doc => {
+                    const d = doc.data();
+                    if (d.type === 'income') financeBalance += Number(d.amount || 0);
+                    else financeBalance -= Number(d.amount || 0);
+                });
+            }
+
+            // 2. Vocab: Count items in array doc
+            const vDoc = await this.db.collection("users").doc(uid).collection("modules").doc("vocab_terms").get();
+            if (vDoc.exists) {
+                const arr = vDoc.data()?.data || [];
+                vocabCount = Array.isArray(arr) ? arr.length : 0;
+            }
+
+            // 3. Tasks: Count uncompleted
+            const tDoc = await this.db.collection("users").doc(uid).collection("modules").doc("tasks").get();
+            if (tDoc.exists) {
+                const arr = tDoc.data()?.data || [];
+                if (Array.isArray(arr)) {
+                    pendingTasks = arr.filter((t: any) => !t.completed).length;
+                }
+            }
+
+            // 4. Habits: Count & Streak
+            const hDoc = await this.db.collection("users").doc(uid).collection("modules").doc("habits").get();
+            if (hDoc.exists) {
+                const arr = hDoc.data()?.data || [];
+                if (Array.isArray(arr)) {
+                    activeHabits = arr.length;
+                    habitStreak = Math.max(...arr.map((h: any) => h.streak || 0), 0);
+                }
+            }
+
+        } catch (e) {
+            console.error("Error aggregating global stats", e);
+        }
+
+        return {
+            financeBalance,
+            vocabCount,
+            pendingTasks,
+            activeHabits,
+            habitStreak
+        };
     }
 }
 

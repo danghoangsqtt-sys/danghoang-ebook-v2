@@ -28,7 +28,7 @@ export interface CourseNode {
   isPinned?: boolean;      // Pin to top
   createdAt?: number;      // Timestamp for creation date sorting
   updatedAt?: number;      // Timestamp for modification date sorting
-  
+
   // New Metadata for Folders
   topic?: string;
   level?: string;
@@ -140,16 +140,25 @@ export interface UserSettings {
 }
 
 export interface ChatMessage {
-  id: string;
+  id?: string;
   role: 'user' | 'model';
   text: string;
-  timestamp: number;
+  timestamp?: number;
+  sources?: { title: string; uri: string }[];
+  isThinking?: boolean;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  updatedAt: number;
 }
 
 export interface UserProfile {
-    uid?: string;
-    name: string;
-    avatar: string;
-    email?: string;
-    accessToken?: string; // Google OAuth Access Token
+  uid?: string;
+  name: string;
+  avatar: string;
+  email?: string;
+  accessToken?: string; // Google OAuth Access Token
 }

@@ -19,7 +19,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
     rate: 1.0,
     pitch: 1.0,
     volume: 1.0,
-    autoRead: true,
+    autoRead: false, // Default: Do NOT read automatically
     style: 'formal'
 };
 
@@ -66,27 +66,47 @@ class SpeechService {
 
         // 1. Filter by Language
         if (criteria.lang) {
-            const exactLang = candidates.filter(v => v.lang.toLowerCase() === criteria.lang!.toLowerCase());
-            if (exactLang.length > 0) {
-                candidates = exactLang;
-            } else {
-                candidates = candidates.filter(v => v.lang.toLowerCase().includes(criteria.lang!.toLowerCase()));
-            }
+            // Match strict or partial (e.g., 'vi' matches 'vi-VN')
+            candidates = candidates.filter(v => v.lang.toLowerCase().includes(criteria.lang!.toLowerCase().split('-')[0]));
         }
 
-        // 2. Filter by Region/Name
+        // 2. Special handling for Vietnamese (Prioritize Northern Female)
+        if (!criteria.lang || criteria.lang.toLowerCase().includes('vi')) {
+            // Priority A: Microsoft HoaiMy (Excellent Northern Female - Edge)
+            const msHoaiMy = candidates.find(v => v.name.includes('Microsoft HoaiMy'));
+            if (msHoaiMy) return msHoaiMy;
+
+            // Priority B: Google Tiếng Việt (Standard Northern Female - Chrome)
+            const googleVi = candidates.find(v =>
+                v.name.includes('Google Tiếng Việt') || v.name.includes('Google Vietnamese')
+            );
+            if (googleVi) return googleVi;
+
+            // Priority C: Apple "Linh" (Northern Female - iOS/macOS)
+            const appleLinh = candidates.find(v => v.name.includes('Linh'));
+            if (appleLinh) return appleLinh;
+
+            // Priority D: Explicit "Female" + "Vietnam" in name
+            const femaleVi = candidates.find(v =>
+                v.name.toLowerCase().includes('vietnam') &&
+                (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('nữ'))
+            );
+            if (femaleVi) return femaleVi;
+        }
+
+        // 3. Filter by Region/Name
         if (criteria.region) {
             const reg = criteria.region.toLowerCase();
             candidates = candidates.filter(v => v.name.toLowerCase().includes(reg));
         }
 
-        // 3. Filter by Gender
+        // 4. Filter by Gender (Generic)
         if (criteria.gender) {
             const target = criteria.gender.toLowerCase();
             const genderMatches = candidates.filter(v => {
                 const name = v.name.toLowerCase();
                 if (target === 'female') {
-                    return name.includes('female') || name.includes('woman') || name.includes('samantha') || name.includes('zira') || name.includes('google') || name.includes('vietnamese');
+                    return name.includes('female') || name.includes('woman') || name.includes('samantha') || name.includes('zira');
                 }
                 if (target === 'male') {
                     return name.includes('male') || name.includes('man') || name.includes('david') || name.includes('daniel') || name.includes('mark');
@@ -96,10 +116,7 @@ class SpeechService {
             if (genderMatches.length > 0) candidates = genderMatches;
         }
 
-        // 4. Prioritize Google Vietnamese
-        const googleVi = candidates.find(v => v.name.includes('Google') && v.lang.includes('vi'));
-        if (googleVi) return googleVi;
-
+        // 5. Fallback to any Google voice (usually higher quality)
         const googleVoice = candidates.find(v => v.name.toLowerCase().includes('google'));
         if (googleVoice) return googleVoice;
 
@@ -162,9 +179,11 @@ class SpeechService {
         let selectedVoice: SpeechSynthesisVoice | undefined;
         if (settings.voiceURI) {
             selectedVoice = this.voices.find(v => v.voiceURI === settings.voiceURI);
-        } else {
-            // Force Google Vietnamese if not specified
-            selectedVoice = this.voices.find(v => v.name.includes('Google') && v.lang.includes('vi')) || this.voices.find(v => v.lang.includes('vi'));
+        }
+
+        // Fallback if selected voice not found or not set, prioritizing Northern Female
+        if (!selectedVoice) {
+            selectedVoice = this.findBestVoice({ lang: 'vi-VN' });
         }
 
         chunks.forEach((chunk) => {
@@ -186,10 +205,6 @@ class SpeechService {
             utterance.volume = settings.volume;
 
             if (selectedVoice) utterance.voice = selectedVoice;
-
-            // Web Speech API doesn't natively support 'pause' duration between queue items perfectly,
-            // but it processes them sequentially.
-            // Some browsers might ignore short pauses, but splitting creates natural gaps.
 
             this.synthesis.speak(utterance);
         });
