@@ -1,105 +1,175 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
-import { firebaseService, FirestoreUser } from '../services/firebase';
+import { firebaseService } from '../services/firebase';
 import { geminiService } from '../services/gemini';
+import { AdminDashboard } from '../components/AdminDashboard';
+import { speechService, VoiceSettings, DEFAULT_VOICE_SETTINGS } from '../services/speech';
 
-// --- Constants & Helpers ---
 const DATA_KEYS = [
     'dh_course_tree_v2', 'dh_completed_lessons',
     'dh_vocab_folders', 'dh_vocab_terms',
     'dh_habits', 'dh_events', 'dh_tasks',
     'dh_fin_trans', 'dh_fin_budgets', 'dh_fin_goals', 'dh_fin_debts',
-    'dh_user_profile', 'dh_theme', 'dh_gemini_api_key'
+    'dh_user_profile', 'dh_theme', 'dh_gemini_api_key', 'dh_chat_history',
+    'dh_voice_settings'
 ];
 
-const AVATARS = ['👨‍💻', '👩‍💻', '🚀', '🐱', '🐶', '🌟', '🎓', '🎵', '🍕', '⚽'];
-const ADMIN_EMAIL = 'danghoang.sqtt@gmail.com';
-
-const inputStyle = "w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 dark:bg-gray-700 dark:text-white dark:border-gray-600 transition-colors placeholder-gray-400 font-medium shadow-sm";
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+    constructor(props: any) {
+        super(props);
+        this.state = { hasError: false };
+    }
+    static getDerivedStateFromError(error: any) {
+        return { hasError: true };
+    }
+    componentDidCatch(error: any, errorInfo: any) {
+        console.error("Settings Crash:", error, errorInfo);
+    }
+    render() {
+        if (this.state.hasError) {
+            return <div className="p-6 text-center text-red-500 bg-red-50 rounded-xl m-4">Đã xảy ra lỗi trong phần Cài Đặt. Vui lòng tải lại trang.</div>;
+        }
+        return this.props.children;
+    }
+}
 
 export const Settings: React.FC = () => {
     const { theme, toggleTheme } = useTheme();
-    const [activeTab, setActiveTab] = useState<'account' | 'preferences' | 'data' | 'help'>('account');
+    const [activeTab, setActiveTab] = useState<'account' | 'preferences' | 'voice' | 'data' | 'help'>('preferences');
 
     // User State
     const [profile, setProfile] = useState<UserProfile>({ name: 'Khách', avatar: '👨‍💻', email: '' });
-    const [voiceName, setVoiceName] = useState('Puck');
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
+    const [isAuthorized, setIsAuthorized] = useState(false);
 
-    // AI Key State (User view)
-    const [apiKey, setApiKey] = useState(''); // Local state for checking if key exists
+    // AI Key State
+    const [apiKey, setApiKey] = useState('');
+    const [showKey, setShowKey] = useState(false);
+    const [isCheckingKey, setIsCheckingKey] = useState(false);
+    const [keyStatus, setKeyStatus] = useState<'unknown' | 'valid' | 'invalid'>('unknown');
 
-    // Admin Panel State
-    const [userList, setUserList] = useState<FirestoreUser[]>([]);
-    const [loadingUsers, setLoadingUsers] = useState(false);
-    const [editingUserKey, setEditingUserKey] = useState<string | null>(null);
-    const [tempKeyInput, setTempKeyInput] = useState('');
+    // Voice Settings State
+    const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
+    const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
 
     // System State
     const [storageStats, setStorageStats] = useState({ used: 0, total: 5242880, percent: 0 });
     const [toast, setToast] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // --- Effects ---
     useEffect(() => {
-        const savedProfile = localStorage.getItem('dh_user_profile');
-        if (savedProfile) {
-            const p = JSON.parse(savedProfile);
-            setProfile(p);
-            setIsAdmin(p.email === ADMIN_EMAIL);
+        const loadProfile = async () => {
+            const savedProfile = localStorage.getItem('dh_user_profile');
+            if (savedProfile) {
+                try {
+                    const p = JSON.parse(savedProfile);
+                    setProfile(p);
 
-            // If user has UID, fetch their assigned key from Firestore
-            if (p.uid && p.email !== ADMIN_EMAIL) {
-                fetchAssignedKey(p.uid);
+                    const adminCheck = p.email === firebaseService.ADMIN_EMAIL;
+                    setIsAdmin(adminCheck);
+
+                    // Check Authorization
+                    const authorized = await firebaseService.isUserAuthorized();
+                    setIsAuthorized(authorized);
+
+                    // Load API Key Logic
+                    const savedKey = localStorage.getItem('dh_gemini_api_key');
+                    if (savedKey) {
+                        setApiKey(savedKey);
+                        // Don't auto validate on every load to save quota, just check format or trust local
+                        setKeyStatus('valid');
+                    } else if (p.uid) {
+                        fetchAssignedKey(p.uid);
+                    }
+                } catch (e) {
+                    console.error("Error loading profile", e);
+                }
+            } else {
+                // Guest Mode
+                const savedKey = localStorage.getItem('dh_gemini_api_key');
+                if (savedKey) {
+                    setApiKey(savedKey);
+                    setKeyStatus('valid');
+                }
             }
-        }
-
-        const savedVoice = localStorage.getItem('dh_voice_pref');
-        if (savedVoice) setVoiceName(savedVoice);
-
-        const savedKey = localStorage.getItem('dh_gemini_api_key');
-        if (savedKey) setApiKey(savedKey);
-
+        };
+        loadProfile();
         calculateStorage();
+        loadVoiceSettings();
+
+        // Cleanup on unmount
+        return () => {
+            speechService.cancel();
+        };
     }, []);
 
-    useEffect(() => {
-        // If admin switches to Account tab, fetch users
-        if (isAdmin && activeTab === 'preferences') {
-            fetchUsers();
-        }
-    }, [isAdmin, activeTab]);
+    const loadVoiceSettings = async () => {
+        // Load voices
+        const voices = await speechService.getVoices();
+        setAvailableVoices(voices);
 
-    // --- Logic ---
+        // Load saved settings
+        const saved = localStorage.getItem('dh_voice_settings');
+        if (saved) {
+            setVoiceSettings(JSON.parse(saved));
+        } else {
+            // Smart default
+            const defaultVoice = speechService.findBestVoice({ lang: 'vi-VN' });
+            if (defaultVoice) {
+                setVoiceSettings(prev => ({ ...prev, voiceURI: defaultVoice.voiceURI }));
+            }
+        }
+    };
+
+    const updateVoiceSetting = (field: keyof VoiceSettings, value: any) => {
+        const newSettings = { ...voiceSettings, [field]: value };
+        setVoiceSettings(newSettings);
+        localStorage.setItem('dh_voice_settings', JSON.stringify(newSettings));
+    };
+
+    const testVoice = () => {
+        speechService.speak("Hế lô! Nana đây. Giọng tớ nghe ổn không nè? Kaka!", voiceSettings);
+    };
+
     const fetchAssignedKey = async (uid: string) => {
         const assignedKey = await firebaseService.getMyAssignedApiKey(uid);
         if (assignedKey) {
             geminiService.updateApiKey(assignedKey);
             setApiKey(assignedKey);
-            // Optional: Don't show toast on every load, only if it changed? 
-            // For now silent sync is better.
+            setKeyStatus('valid');
+            localStorage.setItem('dh_gemini_api_key', assignedKey);
         }
     };
 
-    const fetchUsers = async () => {
-        setLoadingUsers(true);
-        const users = await firebaseService.getAllUsers();
-        setUserList(users);
-        setLoadingUsers(false);
-    };
+    const checkAndSaveKey = async () => {
+        if (!apiKey.trim()) return;
 
-    const handleAssignKey = async (uid: string) => {
-        if (!tempKeyInput.trim()) return;
-        try {
-            await firebaseService.updateUserApiKey(uid, tempKeyInput.trim());
-            showToast("Đã kích hoạt AI cho người dùng này!");
-            setEditingUserKey(null);
-            setTempKeyInput('');
-            fetchUsers(); // Refresh list
-        } catch (e) {
-            alert("Lỗi khi lưu Key.");
+        setIsCheckingKey(true);
+        setKeyStatus('unknown');
+
+        geminiService.updateApiKey(apiKey);
+
+        const isValid = await geminiService.validateKey();
+        setKeyStatus(isValid ? 'valid' : 'invalid');
+        setIsCheckingKey(false);
+
+        if (isValid) {
+            showToast("Kích hoạt AI thành công! 🚀");
+            localStorage.setItem('dh_gemini_api_key', apiKey);
+
+            if (isAdmin && profile.uid) {
+                try {
+                    await firebaseService.updateUserApiKey(profile.uid, apiKey);
+                    showToast("Đã cập nhật System API Key!");
+                } catch (e) {
+                    showToast("Lỗi khi lưu Cloud.");
+                }
+            }
+        } else {
+            showToast("API Key không hoạt động. Vui lòng kiểm tra lại.");
         }
     };
 
@@ -111,7 +181,7 @@ export const Settings: React.FC = () => {
     const calculateStorage = () => {
         let total = 0;
         for (const key in localStorage) {
-            if (localStorage.hasOwnProperty(key)) {
+            if (localStorage.hasOwnProperty(key) && key.startsWith('dh_')) {
                 total += ((localStorage[key].length + key.length) * 2);
             }
         }
@@ -136,14 +206,21 @@ export const Settings: React.FC = () => {
             setProfile(newProfile);
             localStorage.setItem('dh_user_profile', JSON.stringify(newProfile));
 
-            const adminCheck = newProfile.email === ADMIN_EMAIL;
-            setIsAdmin(adminCheck);
+            const checkAdmin = newProfile.email === firebaseService.ADMIN_EMAIL;
+            setIsAdmin(checkAdmin);
 
-            if (!adminCheck) {
-                fetchAssignedKey(newProfile.uid!);
+            const authorized = await firebaseService.isUserAuthorized();
+            setIsAuthorized(authorized);
+
+            if (result.apiKey) {
+                geminiService.updateApiKey(result.apiKey);
+                setApiKey(result.apiKey);
+                setKeyStatus('valid');
+                localStorage.setItem('dh_gemini_api_key', result.apiKey);
+                showToast(`Đã đồng bộ AI Key!`);
             }
 
-            showToast(`Xin chào, ${newProfile.name}! Đăng nhập thành công.`);
+            showToast(`Xin chào, ${newProfile.name}!`);
         }
         setIsLoggingIn(false);
     };
@@ -153,30 +230,19 @@ export const Settings: React.FC = () => {
         const guestProfile: UserProfile = { name: 'Khách', avatar: '👨‍💻', email: '' };
         setProfile(guestProfile);
         setIsAdmin(false);
+        setIsAuthorized(false);
         localStorage.setItem('dh_user_profile', JSON.stringify(guestProfile));
 
-        // Clear sensitive key on logout
-        localStorage.removeItem('dh_gemini_api_key');
-        setApiKey('');
-        geminiService.updateApiKey(''); // Reset service
-
+        setKeyStatus(apiKey ? 'unknown' : 'invalid');
         showToast('Đã đăng xuất.');
     };
 
-    const handleSaveProfileLocal = () => {
-        localStorage.setItem('dh_user_profile', JSON.stringify(profile));
-        localStorage.setItem('dh_voice_pref', voiceName);
-        showToast('Đã lưu cài đặt thành công!');
-    };
-
-    // --- Data Management ---
     const handleExportData = () => {
         const backup: Record<string, any> = {};
         DATA_KEYS.forEach(key => {
             const val = localStorage.getItem(key);
             if (val) backup[key] = JSON.parse(val);
         });
-
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup));
         const downloadAnchorNode = document.createElement('a');
         downloadAnchorNode.setAttribute("href", dataStr);
@@ -190,7 +256,6 @@ export const Settings: React.FC = () => {
     const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = (event) => {
             try {
@@ -202,30 +267,27 @@ export const Settings: React.FC = () => {
                         count++;
                     }
                 });
-                showToast(`Đã khôi phục ${count} mục dữ liệu! Vui lòng tải lại trang.`);
+                showToast(`Khôi phục ${count} mục thành công!`);
                 setTimeout(() => window.location.reload(), 1500);
             } catch (err) {
-                alert("File sao lưu không hợp lệ.");
+                alert("File không hợp lệ.");
             }
         };
         reader.readAsText(file);
     };
 
-    const handleClearData = (type: 'all' | 'cache') => {
-        if (type === 'all') {
-            if (window.confirm("CẢNH BÁO: Hành động này sẽ xóa TOÀN BỘ dữ liệu. Bạn có chắc chắn không?")) {
-                localStorage.clear();
-                window.location.reload();
-            }
-        } else {
-            showToast("Đã dọn dẹp bộ nhớ tạm.");
+    const handleFactoryReset = () => {
+        if (window.confirm('⚠️ CẢNH BÁO: Hành động này sẽ xóa TOÀN BỘ dữ liệu trên thiết bị này. Bạn có chắc chắn không?')) {
+            localStorage.clear();
+            showToast('Đang reset hệ thống...');
+            setTimeout(() => window.location.reload(), 1000);
         }
     };
 
     const TabButton = ({ id, label, icon }: { id: typeof activeTab, label: string, icon: string }) => (
         <button
             onClick={() => setActiveTab(id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm md:text-base ${activeTab === id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold text-sm md:text-base ${activeTab === id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-sm border border-blue-100 dark:border-blue-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent'}`}
         >
             <span className="text-xl">{icon}</span>
             {label}
@@ -233,275 +295,355 @@ export const Settings: React.FC = () => {
     );
 
     return (
-        <div className="max-w-6xl mx-auto pb-20 animate-fade-in">
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-                <span>⚙️</span> Cài Đặt & Hệ Thống
-            </h1>
+        <ErrorBoundary>
+            <div className="max-w-6xl mx-auto pb-20 animate-fade-in">
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                    <span>⚙️</span> Cài Đặt & Hệ Thống
+                </h1>
 
-            <div className="flex flex-col lg:flex-row gap-8">
-
-                {/* Sidebar Navigation */}
-                <div className="w-full lg:w-64 shrink-0 space-y-2">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-2">
-                        <TabButton id="account" label="Tài khoản" icon="👤" />
-                        <TabButton id="preferences" label="Giao diện & Tiện ích" icon="🎨" />
-                        <TabButton id="data" label="Dữ liệu & Sao lưu" icon="💾" />
-                        <TabButton id="help" label="Trợ giúp" icon="❓" />
-                    </div>
-
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
-                        <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">Dung lượng LocalStorage</h3>
-                        <div className="flex justify-between text-xs mb-1 font-medium">
-                            <span className="text-gray-800 dark:text-white">{(storageStats.used / 1024).toFixed(1)} KB</span>
-                            <span className="text-gray-400">/ 5MB</span>
-                        </div>
-                        <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
-                            <div
-                                className={`h-full rounded-full transition-all duration-500 ${storageStats.percent > 80 ? 'bg-red-500' : 'bg-blue-500'}`}
-                                style={{ width: `${storageStats.percent}%` }}
-                            ></div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Main Content Area */}
-                <div className="flex-1">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 md:p-8 min-h-[500px]">
-
-                        {/* TAB: ACCOUNT */}
-                        {activeTab === 'account' && (
-                            <div className="space-y-8 animate-fade-in">
-                                <div>
-                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-1">Tài khoản & Đồng bộ</h2>
-                                    <p className="text-sm text-gray-500">Đăng nhập Google để đồng bộ Lịch và lưu trữ dữ liệu đám mây.</p>
-                                </div>
-
-                                {profile.email ? (
-                                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 p-6 rounded-2xl flex flex-col md:flex-row items-center gap-6">
-                                        <img src={profile.avatar} alt="Avatar" className="w-20 h-20 rounded-full border-4 border-white shadow-md" onError={(e) => (e.target as HTMLImageElement).src = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'} />
-                                        <div className="text-center md:text-left flex-1">
-                                            <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2 justify-center md:justify-start">
-                                                {profile.name}
-                                                {isAdmin && <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full">ADMIN</span>}
-                                            </h3>
-                                            <p className="text-sm text-gray-600 dark:text-gray-300">{profile.email}</p>
-                                            <div className="mt-2 flex flex-wrap gap-2 justify-center md:justify-start">
-                                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-lg font-bold">● Đã liên kết Google</span>
-                                            </div>
-                                        </div>
-                                        <button onClick={handleLogout} className="px-4 py-2 bg-white text-red-600 border border-red-200 hover:bg-red-50 rounded-xl font-bold shadow-sm transition-colors">
-                                            Đăng xuất
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="bg-gray-50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-700 p-8 rounded-2xl text-center">
-                                        <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center text-3xl shadow-sm mx-auto mb-4">👤</div>
-                                        <h3 className="text-lg font-bold text-gray-800 dark:text-white">Bạn đang dùng chế độ Khách</h3>
-                                        <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Dữ liệu chỉ được lưu trên thiết bị này. Hãy đăng nhập để đồng bộ Google Calendar và bảo vệ dữ liệu.</p>
-
-                                        <button onClick={handleGoogleLogin} disabled={isLoggingIn} className="inline-flex items-center gap-3 px-6 py-3 bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-xl font-bold shadow-sm transition-all hover:shadow-md disabled:opacity-70">
-                                            {isLoggingIn ? (
-                                                <span>Đang kết nối...</span>
-                                            ) : (
-                                                <>
-                                                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" className="w-5 h-5" />
-                                                    <span>Đăng nhập bằng Google</span>
-                                                </>
-                                            )}
-                                        </button>
-                                    </div>
-                                )}
-
-                                <div className="border-t border-gray-100 dark:border-gray-700 pt-6">
-                                    <h3 className="font-bold text-gray-800 dark:text-white mb-4">Chỉnh sửa thông tin cục bộ</h3>
-                                    <div className="flex flex-col md:flex-row gap-6 items-start">
-                                        <div className="flex flex-col items-center gap-3">
-                                            <div className="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center text-3xl border border-blue-100 shadow-sm">
-                                                {profile.avatar.length < 5 ? profile.avatar : '😊'}
-                                            </div>
-                                            <div className="grid grid-cols-5 gap-2">
-                                                {AVATARS.map(a => (
-                                                    <button key={a} onClick={() => setProfile({ ...profile, avatar: a })} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg hover:bg-gray-100 transition-colors ${profile.avatar === a ? 'bg-blue-100 ring-2 ring-blue-400' : ''}`}>
-                                                        {a}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                        <div className="flex-1 w-full space-y-4">
-                                            <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tên hiển thị</label><input value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} className={inputStyle} /></div>
-                                            <button onClick={handleSaveProfileLocal} className="px-6 py-2 bg-gray-800 text-white hover:bg-gray-900 rounded-lg font-bold shadow-sm transition-colors text-sm">Lưu cục bộ</button>
-                                        </div>
-                                    </div>
-                                </div>
+                <div className="flex flex-col lg:flex-row gap-8">
+                    <div className="w-full lg:w-72 shrink-0 space-y-4">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-2xl border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                {profile.avatar.startsWith('http') ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" /> : profile.avatar}
                             </div>
-                        )}
+                            <div className="min-w-0">
+                                <p className="font-bold text-gray-800 dark:text-white truncate">{profile.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{profile.email || 'Chế độ Khách'}</p>
+                            </div>
+                        </div>
 
-                        {/* TAB: PREFERENCES (API KEY & THEME) */}
-                        {activeTab === 'preferences' && (
-                            <div className="space-y-8 animate-fade-in">
-                                <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Giao diện & Tiện ích</h2>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-2">
+                            <TabButton id="preferences" label="Giao diện & Tiện ích" icon="🎨" />
+                            <TabButton id="voice" label="Giọng nói & Giao tiếp" icon="🎙️" />
+                            <TabButton id="account" label="Tài khoản" icon="👤" />
+                            <TabButton id="data" label="Quản lý Dữ liệu" icon="💾" />
+                            <TabButton id="help" label="Trợ giúp" icon="❓" />
+                        </div>
+                    </div>
 
-                                {/* Theme */}
-                                <div className="flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border border-gray-100 dark:border-gray-700">
-                                    <div><h3 className="font-bold text-gray-800 dark:text-white">Chế độ Giao diện</h3><p className="text-xs text-gray-500">Chuyển đổi giữa Sáng và Tối</p></div>
-                                    <div className="flex bg-white dark:bg-gray-800 p-1 rounded-lg border border-gray-200 dark:border-gray-600">
-                                        <button onClick={() => toggleTheme('light')} className={`px-3 py-1.5 rounded-md text-sm font-bold transition-all ${theme === 'light' ? 'bg-blue-100 text-blue-700' : 'text-gray-500'}`}>☀️ Sáng</button>
-                                        <button onClick={() => toggleTheme('dark')} className={`px-3 py-1.5 rounded-md text-sm font-bold transition-all ${theme === 'dark' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>🌙 Tối</button>
-                                    </div>
+                    <div className="flex-1">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 md:p-8 min-h-[600px]">
+
+                            {activeTab === 'preferences' && (
+                                <div className="space-y-10 animate-fade-in">
+                                    <section>
+                                        <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4">Giao diện & Trải nghiệm</h2>
+                                        <div className="bg-gray-50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-700 rounded-xl p-5 flex items-center justify-between">
+                                            <div>
+                                                <h3 className="font-bold text-gray-800 dark:text-white text-sm">Chế độ Hiển thị</h3>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Tùy chỉnh giao diện Sáng hoặc Tối</p>
+                                            </div>
+                                            <div className="flex bg-white dark:bg-gray-800 p-1 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm">
+                                                <button onClick={() => toggleTheme('light')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all flex items-center gap-1 ${theme === 'light' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 dark:text-gray-400'}`}>☀️ Sáng</button>
+                                                <button onClick={() => toggleTheme('dark')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all flex items-center gap-1 ${theme === 'dark' ? 'bg-gray-700 text-white' : 'text-gray-500 dark:text-gray-400'}`}>🌙 Tối</button>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    <section>
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <h2 className="text-lg font-bold text-gray-800 dark:text-white">Trợ lý AI & Tính năng nâng cao</h2>
+                                            {keyStatus === 'valid' && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold border border-green-200">Đang hoạt động</span>}
+                                        </div>
+
+                                        {isAdmin ? (
+                                            <div className="bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-xl p-6">
+                                                <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
+                                                    <label className="text-sm font-bold text-gray-700 dark:text-gray-200 block mb-2">System-wide Gemini API Key (Admin)</label>
+                                                    <div className="flex gap-2">
+                                                        <div className="relative flex-1">
+                                                            <input
+                                                                type={showKey ? "text" : "password"}
+                                                                value={apiKey}
+                                                                onChange={(e) => setApiKey(e.target.value)}
+                                                                className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-10 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors"
+                                                                placeholder="Paste your System API Key here..."
+                                                            />
+                                                            <button onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                                                {showKey ? '🙈' : '👁️'}
+                                                            </button>
+                                                        </div>
+                                                        <button
+                                                            onClick={checkAndSaveKey}
+                                                            disabled={isCheckingKey || !apiKey}
+                                                            className={`px-6 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center gap-2 ${keyStatus === 'valid' ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                                                        >
+                                                            {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu System Key'}
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-2">* Key này sẽ được dùng cho toàn bộ hệ thống.</p>
+                                                </div>
+                                                {/* Integrated Admin Dashboard */}
+                                                <AdminDashboard />
+                                            </div>
+                                        ) : (
+                                            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
+                                                <div className="relative z-10 flex flex-col md:flex-row items-center gap-6">
+                                                    <div className="flex-1 text-center md:text-left">
+                                                        <h3 className="text-xl font-bold mb-2">
+                                                            {isAuthorized ? 'Tài khoản của bạn đã được kích hoạt 🚀' : 'Kích hoạt tính năng AI & Cloud Storage'}
+                                                        </h3>
+                                                        <p className="text-blue-100 text-sm mb-4 leading-relaxed">
+                                                            {isAuthorized
+                                                                ? 'Bạn có quyền truy cập đầy đủ vào Trợ lý ảo Nana và Đồng bộ đám mây.'
+                                                                : 'Để sử dụng Trợ lý ảo Nana, Chấm điểm Writing AI và đồng bộ dữ liệu đám mây, vui lòng liên hệ Admin.'
+                                                            }
+                                                        </p>
+                                                        {!isAuthorized && (
+                                                            <div className="inline-flex items-center gap-3 bg-white/20 backdrop-blur-md border border-white/30 px-4 py-2 rounded-lg hover:bg-white/30 transition-colors cursor-pointer">
+                                                                <span className="text-2xl">💬</span>
+                                                                <div className="text-left">
+                                                                    <p className="text-[10px] uppercase font-bold text-blue-200">Liên hệ Zalo Admin</p>
+                                                                    <p className="font-bold text-lg">0343019101</p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="hidden md:block text-8xl opacity-20">{isAuthorized ? '✅' : '🔒'}</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </section>
                                 </div>
+                            )}
 
-                                {/* API Key Configuration (Different for Admin vs User) */}
-                                <div className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border border-gray-100 dark:border-gray-700">
-                                    <div className="mb-3">
-                                        <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                                            🤖 Mở khóa tính năng AI
-                                            <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Quan trọng</span>
-                                        </h3>
-                                    </div>
+                            {activeTab === 'voice' && (
+                                <div className="space-y-8 animate-fade-in">
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-1">Cài đặt Giọng nói & Giao tiếp</h2>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                        Tùy chỉnh giọng đọc của Nana trong phần Chat và Luyện nói.
+                                    </p>
 
-                                    {isAdmin ? (
-                                        // --- ADMIN VIEW ---
-                                        <div className="space-y-4">
-                                            <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-sm text-blue-800">
-                                                <strong>👋 Admin Mode:</strong> Bạn có quyền quản lý và cấp API Key cho người dùng bên dưới.
+                                    <div className="grid gap-6">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Chọn Giọng Đọc (Browser TTS)</label>
+                                            <select
+                                                value={voiceSettings.voiceURI}
+                                                onChange={(e) => updateVoiceSetting('voiceURI', e.target.value)}
+                                                className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm bg-white dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                            >
+                                                {availableVoices.length === 0 && <option value="">Đang tải giọng đọc...</option>}
+                                                {availableVoices.map(v => (
+                                                    <option key={v.voiceURI} value={v.voiceURI}>
+                                                        {v.name} ({v.lang}) {v.default ? '(Mặc định)' : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <p className="text-xs text-gray-500 mt-1.5">
+                                                * Ưu tiên chọn các giọng "Google Vietnamese" để có chất lượng tốt nhất.
+                                            </p>
+                                        </div>
+
+                                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+                                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Phong cách (Style)</label>
+                                            <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl">
+                                                <button
+                                                    onClick={() => updateVoiceSetting('style', 'formal')}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${!voiceSettings.style || voiceSettings.style === 'formal' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-white shadow-sm' : 'text-gray-500'}`}
+                                                >
+                                                    👔 Nghiêm túc
+                                                </button>
+                                                <button
+                                                    onClick={() => updateVoiceSetting('style', 'casual')}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${voiceSettings.style === 'casual' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500'}`}
+                                                >
+                                                    😎 Vui vẻ (Casual)
+                                                </button>
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-2 text-center">Chế độ Vui vẻ sẽ nói nhanh hơn và biểu cảm hơn.</p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div className="bg-gray-50 dark:bg-gray-900/30 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
+                                                <div className="flex justify-between mb-2">
+                                                    <label className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Tốc độ (Speed)</label>
+                                                    <span className="text-xs font-bold text-blue-600">{voiceSettings.rate}x</span>
+                                                </div>
+                                                <input
+                                                    type="range" min="0.5" max="2" step="0.1"
+                                                    value={voiceSettings.rate}
+                                                    onChange={(e) => updateVoiceSetting('rate', parseFloat(e.target.value))}
+                                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                                                />
                                             </div>
 
-                                            {loadingUsers ? <div className="text-center text-gray-500">Đang tải danh sách người dùng...</div> : (
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full text-sm text-left">
-                                                        <thead className="text-xs text-gray-500 uppercase bg-gray-100 dark:bg-gray-700">
-                                                            <tr>
-                                                                <th className="px-4 py-2">User</th>
-                                                                <th className="px-4 py-2">Email</th>
-                                                                <th className="px-4 py-2">Status</th>
-                                                                <th className="px-4 py-2">Action</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {userList.map(user => (
-                                                                <tr key={user.uid} className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
-                                                                    <td className="px-4 py-3 font-medium">{user.name}</td>
-                                                                    <td className="px-4 py-3 text-gray-500">{user.email}</td>
-                                                                    <td className="px-4 py-3">
-                                                                        {user.isActiveAI ?
-                                                                            <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-0.5 rounded">Active</span> :
-                                                                            <span className="bg-gray-100 text-gray-800 text-xs font-bold px-2 py-0.5 rounded">Inactive</span>
-                                                                        }
-                                                                    </td>
-                                                                    <td className="px-4 py-3">
-                                                                        {editingUserKey === user.uid ? (
-                                                                            <div className="flex gap-2">
-                                                                                <input
-                                                                                    type="text"
-                                                                                    placeholder="Paste API Key"
-                                                                                    className="border rounded px-2 py-1 w-32 text-xs"
-                                                                                    value={tempKeyInput}
-                                                                                    onChange={e => setTempKeyInput(e.target.value)}
-                                                                                />
-                                                                                <button onClick={() => handleAssignKey(user.uid)} className="text-green-600 font-bold">✔</button>
-                                                                                <button onClick={() => { setEditingUserKey(null); setTempKeyInput('') }} className="text-red-600 font-bold">✕</button>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <button onClick={() => { setEditingUserKey(user.uid); setTempKeyInput(user.geminiApiKey || '') }} className="text-blue-600 hover:underline text-xs font-bold">
-                                                                                {user.isActiveAI ? 'Edit Key' : '+ Add Key'}
-                                                                            </button>
-                                                                        )}
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
+                                            <div className="bg-gray-50 dark:bg-gray-900/30 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
+                                                <div className="flex justify-between mb-2">
+                                                    <label className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Cao độ (Pitch)</label>
+                                                    <span className="text-xs font-bold text-blue-600">{voiceSettings.pitch}</span>
                                                 </div>
-                                            )}
+                                                <input
+                                                    type="range" min="0.5" max="2" step="0.1"
+                                                    value={voiceSettings.pitch}
+                                                    onChange={(e) => updateVoiceSetting('pitch', parseFloat(e.target.value))}
+                                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm">
+                                            <div>
+                                                <h4 className="font-bold text-sm text-gray-800 dark:text-white">Tự động đọc tin nhắn trả lời</h4>
+                                                <p className="text-xs text-gray-500 mt-1">Nana sẽ tự động đọc to câu trả lời trong Chat.</p>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    className="sr-only peer"
+                                                    checked={voiceSettings.autoRead}
+                                                    onChange={(e) => updateVoiceSetting('autoRead', e.target.checked)}
+                                                />
+                                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </label>
+                                        </div>
+
+                                        <div className="flex justify-end">
+                                            <button onClick={testVoice} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95 flex items-center gap-2">
+                                                <span>🔊</span> Nghe thử giọng
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'account' && (
+                                <div className="space-y-8 animate-fade-in">
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-1">Tài khoản & Đồng bộ</h2>
+
+                                    {!profile.email ? (
+                                        <div className="bg-white border border-gray-200 dark:border-gray-700 p-8 rounded-2xl text-center shadow-sm max-w-md mx-auto">
+                                            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">👤</div>
+                                            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">Bạn đang dùng chế độ Khách</h3>
+                                            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+                                                Dữ liệu chỉ được lưu trên thiết bị này. Đăng nhập để bảo vệ dữ liệu và yêu cầu quyền truy cập AI.
+                                            </p>
+                                            <button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full inline-flex items-center justify-center gap-3 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95">
+                                                {isLoggingIn ? <span className="animate-spin">↻</span> : 'G'}
+                                                {isLoggingIn ? 'Đang kết nối...' : 'Đăng nhập Google'}
+                                            </button>
                                         </div>
                                     ) : (
-                                        // --- USER VIEW ---
-                                        <div className="space-y-3">
-                                            {apiKey ? (
-                                                <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                                                    <div className="w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xl">✨</div>
-                                                    <div>
-                                                        <p className="font-bold text-green-800 text-sm">AI đã được kích hoạt</p>
-                                                        <p className="text-xs text-green-700">Bạn có thể sử dụng mọi tính năng thông minh.</p>
+                                        <div className="bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-700 p-6 rounded-2xl">
+                                            <div className="flex flex-col sm:flex-row items-center gap-6">
+                                                <div className="relative">
+                                                    <img src={profile.avatar} alt="Avatar" className="w-20 h-20 rounded-full border-4 border-white dark:border-gray-700 shadow-md" />
+                                                    <div className={`absolute bottom-0 right-0 w-5 h-5 border-2 border-white rounded-full ${isAuthorized ? 'bg-green-500' : 'bg-orange-500'}`} title={isAuthorized ? 'Activated' : 'Pending'}></div>
+                                                </div>
+                                                <div className="text-center sm:text-left flex-1">
+                                                    <div className="flex items-center justify-center sm:justify-start gap-2">
+                                                        <h3 className="text-xl font-bold text-gray-800 dark:text-white">{profile.name}</h3>
+                                                        {isAdmin && <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold shadow-sm">ADMIN</span>}
+                                                    </div>
+                                                    <p className="text-sm text-gray-600 dark:text-gray-300 font-medium">{profile.email}</p>
+
+                                                    <div className="mt-2 flex flex-wrap gap-2 justify-center sm:justify-start">
+                                                        {isAuthorized ? (
+                                                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-bold flex items-center gap-1">
+                                                                <span>☁️</span> Trạng thái: {isAdmin ? 'Đã kích hoạt (ADMIN)' : 'Đã kích hoạt'}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-bold flex items-center gap-1">
+                                                                <span>⚠️</span> Chưa kích hoạt
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
-                                            ) : (
-                                                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-600 text-center">
-                                                    <div className="text-4xl mb-2">🔒</div>
-                                                    <h4 className="font-bold text-gray-800 dark:text-white mb-1">Chức năng AI chưa kích hoạt</h4>
-                                                    <p className="text-sm text-gray-500 mb-4">Vui lòng liên hệ Admin để mở khóa tính năng này.</p>
+                                                <button onClick={handleLogout} className="px-5 py-2 bg-white dark:bg-gray-800 text-red-600 border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl font-bold shadow-sm transition-colors whitespace-nowrap">
+                                                    Đăng xuất
+                                                </button>
+                                            </div>
 
-                                                    <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-100 dark:border-blue-800 font-medium text-sm">
-                                                        <span>Zalo Admin:</span>
-                                                        <strong className="select-all">0343019101</strong>
+                                            {!isAuthorized && !isAdmin && (
+                                                <div className="mt-6 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-xl p-4 flex items-start gap-3">
+                                                    <span className="text-2xl">⚠️</span>
+                                                    <div>
+                                                        <h4 className="font-bold text-orange-800 dark:text-orange-300 text-sm">Tài khoản chưa được kích hoạt</h4>
+                                                        <p className="text-xs text-orange-700 dark:text-orange-400 mt-1 leading-relaxed">
+                                                            Để mở khóa tính năng AI và Lưu trữ đám mây, vui lòng liên hệ Admin qua Zalo.
+                                                        </p>
                                                     </div>
                                                 </div>
                                             )}
                                         </div>
                                     )}
                                 </div>
+                            )}
 
-                                {/* Voice */}
-                                <div className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border border-gray-100 dark:border-gray-700">
-                                    <div className="mb-3"><h3 className="font-bold text-gray-800 dark:text-white">Giọng nói Trợ lý Nana</h3><p className="text-xs text-gray-500">Dành cho tính năng Live Voice & Speaking</p></div>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                        {['Puck', 'Kore', 'Fenrir', 'Aoede'].map(v => (
-                                            <button key={v} onClick={() => { setVoiceName(v); handleSaveProfileLocal(); }} className={`p-3 rounded-xl border text-center transition-all ${voiceName === v ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600'}`}>
-                                                <div className="text-2xl mb-1">{['Puck', 'Fenrir'].includes(v) ? '👨' : '👩'}</div><span className="font-bold text-sm">{v}</span>
+                            {activeTab === 'data' && (
+                                <div className="space-y-8 animate-fade-in">
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Quản lý Dữ liệu</h2>
+
+                                    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
+                                        <p className="text-xs font-bold text-gray-500 uppercase mb-2">Dung lượng sử dụng trên thiết bị</p>
+                                        <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full overflow-hidden mb-1">
+                                            <div className="bg-blue-500 h-full transition-all duration-1000" style={{ width: `${storageStats.percent}%` }}></div>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] text-gray-400">
+                                            <span>{(storageStats.used / 1024).toFixed(1)} KB</span>
+                                            <span>Giới hạn ~5 MB</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div onClick={handleExportData} className="p-6 rounded-2xl border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 cursor-pointer transition-all text-center group hover:border-blue-400">
+                                            <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-3 group-hover:scale-110 transition-transform">📤</div>
+                                            <h3 className="font-bold text-blue-800 text-sm">Xuất dữ liệu (Backup)</h3>
+                                            <p className="text-xs text-blue-600/70 mt-1">Tải về file .json chứa toàn bộ dữ liệu cá nhân.</p>
+                                        </div>
+
+                                        <div className="p-6 rounded-2xl border-2 border-dashed border-green-200 bg-green-50/50 hover:bg-green-50 cursor-pointer relative text-center group hover:border-green-400">
+                                            <input type="file" accept=".json" className="absolute inset-0 opacity-0 cursor-pointer z-10" ref={fileInputRef} onChange={handleImportData} />
+                                            <div className="w-14 h-14 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-3 group-hover:scale-110 transition-transform">📥</div>
+                                            <h3 className="font-bold text-green-800 text-sm">Nhập dữ liệu (Restore)</h3>
+                                            <p className="text-xs text-green-600/70 mt-1">Khôi phục dữ liệu từ file .json đã sao lưu.</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700">
+                                        <h3 className="font-bold text-red-700 dark:text-red-400 flex items-center gap-2 mb-2">⚠️ Vùng nguy hiểm</h3>
+                                        <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                                            <p className="text-xs text-red-600/80 dark:text-red-400/70 leading-relaxed">
+                                                Hành động này sẽ xóa toàn bộ dữ liệu <b>trên trình duyệt này</b> và đưa ứng dụng về trạng thái ban đầu.
+                                            </p>
+                                            <button onClick={handleFactoryReset} className="px-4 py-2 bg-white dark:bg-red-900/20 text-red-600 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/40 rounded-lg text-xs font-bold shadow-sm whitespace-nowrap">
+                                                Reset Ứng Dụng
                                             </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'help' && (
+                                <div className="space-y-6 animate-fade-in">
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Trợ giúp</h2>
+                                    <div className="grid gap-4">
+                                        {[
+                                            { q: 'Google Calendar không đồng bộ?', a: 'Đảm bảo bạn đã đăng nhập Google và cấp quyền truy cập lịch. Kiểm tra trạng thái trong tab "Tài khoản".' },
+                                            { q: 'Dữ liệu của tôi lưu ở đâu?', a: 'Mặc định lưu trên trình duyệt (LocalStorage). Nếu được kích hoạt, dữ liệu sẽ đồng bộ lên Firebase Cloud.' },
+                                            { q: 'Làm sao để kích hoạt AI?', a: `Vui lòng liên hệ Admin để được cấp quyền truy cập.` },
+                                            { q: 'Chế độ Khách có mất dữ liệu không?', a: 'Có, nếu bạn xóa cache trình duyệt. Hãy dùng tính năng "Xuất dữ liệu" thường xuyên.' }
+                                        ].map((item, i) => (
+                                            <div key={i} className="bg-gray-50 dark:bg-gray-700/30 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
+                                                <h4 className="font-bold text-gray-800 dark:text-white text-sm flex items-center gap-2">
+                                                    <span className="text-blue-500">Q.</span> {item.q}
+                                                </h4>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 ml-6 leading-relaxed">A: {item.a}</p>
+                                            </div>
                                         ))}
                                     </div>
                                 </div>
-                            </div>
-                        )}
-
-                        {/* TAB: DATA */}
-                        {activeTab === 'data' && (
-                            <div className="space-y-8 animate-fade-in">
-                                <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Quản lý Dữ liệu</h2>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="p-6 rounded-xl border-2 border-dashed border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors flex flex-col items-center text-center cursor-pointer" onClick={handleExportData}>
-                                        <div className="text-3xl mb-4">📤</div><h3 className="font-bold text-blue-800">Sao lưu dữ liệu (Export)</h3><p className="text-xs text-gray-500 mt-1 px-4">Tải file .json chứa toàn bộ dữ liệu về máy.</p>
-                                    </div>
-                                    <div className="p-6 rounded-xl border-2 border-dashed border-green-200 bg-green-50 hover:bg-green-100 transition-colors flex flex-col items-center text-center cursor-pointer relative">
-                                        <input type="file" accept=".json" className="absolute inset-0 opacity-0 cursor-pointer" ref={fileInputRef} onChange={handleImportData} />
-                                        <div className="text-3xl mb-4">📥</div><h3 className="font-bold text-green-800">Khôi phục dữ liệu (Import)</h3><p className="text-xs text-gray-500 mt-1 px-4">Chọn file .json để khôi phục.</p>
-                                    </div>
-                                </div>
-                                <div className="p-6 bg-red-50 rounded-xl border border-red-100 mt-6">
-                                    <h3 className="font-bold text-red-800 mb-2">⚠️ Vùng nguy hiểm</h3>
-                                    <div className="flex gap-4"><button onClick={() => handleClearData('all')} className="bg-white text-red-600 border border-red-200 px-4 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-red-50 transition-colors">Xóa TOÀN BỘ dữ liệu & Reset App</button></div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* TAB: HELP */}
-                        {activeTab === 'help' && (
-                            <div className="space-y-6 animate-fade-in">
-                                <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Trợ giúp</h2>
-                                <div className="space-y-4">
-                                    <div className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border border-gray-100 dark:border-gray-700">
-                                        <h3 className="font-bold text-sm mb-2">Q: Google Calendar không đồng bộ?</h3>
-                                        {/* ĐÃ SỬA: Dùng ký tự '→' thay cho '->' */}
-                                        <p className="text-sm text-gray-600">A: Đảm bảo bạn đã đăng nhập và cấp quyền truy cập lịch. Vào Settings → Account để kiểm tra.</p>
-                                    </div>
-                                    <div className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border border-gray-100 dark:border-gray-700">
-                                        <h3 className="font-bold text-sm mb-2">Q: Dữ liệu lưu ở đâu?</h3>
-                                        <p className="text-sm text-gray-600">A: Mặc định lưu LocalStorage. Khi đăng nhập Google, dữ liệu vẫn ưu tiên local-first nhưng hỗ trợ đồng bộ các tính năng đám mây.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
+                            )}
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {toast && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-fade-in-up z-50">
-                    <span className="text-green-400 text-xl">✓</span><span className="font-bold text-sm">{toast}</span>
-                </div>
-            )}
-        </div>
+                {toast && (
+                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900/90 backdrop-blur text-white px-6 py-3 rounded-full shadow-2xl z-[60] animate-bounce-up">
+                        <span className="font-bold text-sm flex items-center gap-2">{toast}</span>
+                    </div>
+                )}
+            </div>
+        </ErrorBoundary>
     );
 };

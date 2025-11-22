@@ -1,11 +1,12 @@
 
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, updateDoc } from "firebase/firestore";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, User } from "firebase/auth";
+import firebase from "firebase/compat/app";
+import "firebase/compat/auth";
+import "firebase/compat/firestore";
+import "firebase/compat/storage";
+import { initializeFirestore, persistentLocalCache } from "firebase/firestore";
 import { CourseNode } from "../types";
 
-// Cấu hình Firebase (Lấy từ hình ảnh Project Settings của bạn)
+// Cấu hình Firebase
 const firebaseConfig = {
     apiKey: "AIzaSyDqwU5EKw91pc6So2ggVGcL2WrLfR_mZFg",
     authDomain: "e-book-for-me.firebaseapp.com",
@@ -15,69 +16,71 @@ const firebaseConfig = {
     appId: "1:380456713229:web:4d920884462625ad23a944"
 };
 
-// Internal state
-let db: any = null;
-let storage: any = null;
-let auth: any = null;
-let isConfigured = false;
-
-// Safe Initialization Logic
-const initializeFirebaseSafe = () => {
-    try {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        storage = getStorage(app);
-        auth = getAuth(app);
-        isConfigured = true;
-        console.log("✅ Firebase Initialized Successfully");
-    } catch (error) {
-        console.error("❌ Firebase Initialization Failed:", error);
-        isConfigured = false;
-    }
-};
-
-// Run initialization
-initializeFirebaseSafe();
-
 export interface FirestoreUser {
     uid: string;
     name: string;
     email: string;
     avatar: string;
     lastLogin: number;
-    geminiApiKey?: string; // Field for Admin to set
+    geminiApiKey?: string;
     isActiveAI?: boolean;
-    storageEnabled?: boolean; // New flag for Cloud Storage Authorization
+    storageEnabled?: boolean;
 }
 
 class FirebaseService {
-    // Cache authorization status to avoid Firestore read spam
+    public auth: firebase.auth.Auth; // Changed to public for direct access
+    private db: firebase.firestore.Firestore;
+    private storage: firebase.storage.Storage;
     private _authCache: { uid: string, value: boolean } | null = null;
+    public ADMIN_EMAIL = 'danghoang.sqtt@gmail.com';
 
-    // --- AUTHENTICATION ---
-    async loginWithGoogle(): Promise<{ user: User, token?: string } | null> {
-        if (!isConfigured || !auth) {
-            alert("Chưa cấu hình Firebase. Vui lòng kiểm tra source code.");
-            return null;
+    constructor() {
+        let app: firebase.app.App;
+        if (!firebase.apps.length) {
+            app = firebase.initializeApp(firebaseConfig);
+            // Initialize Firestore with new persistence settings (v9+ modular syntax applied to compat)
+            initializeFirestore(app, { localCache: persistentLocalCache() });
+        } else {
+            app = firebase.app();
         }
 
-        const provider = new GoogleAuthProvider();
-        // Yêu cầu quyền truy cập Google Calendar
+        this.auth = firebase.auth();
+        this.db = firebase.firestore();
+        this.storage = firebase.storage();
+        console.log("✅ Firebase Service Initialized (v12.6.0 Compatible)");
+    }
+
+    async loginWithGoogle(): Promise<{ user: firebase.User, token?: string, apiKey?: string } | null> {
+        const provider = new firebase.auth.GoogleAuthProvider();
         provider.addScope('https://www.googleapis.com/auth/calendar');
 
         try {
-            const result = await signInWithPopup(auth, provider);
-            // Lấy Access Token của Google (quan trọng để gọi Google Calendar API)
-            const credential = GoogleAuthProvider.credentialFromResult(result);
+            const result = await this.auth.signInWithPopup(provider);
+            const credential = result.credential as firebase.auth.OAuthCredential;
             const token = credential?.accessToken;
+            const user = result.user;
 
-            // Sync user info to Firestore for Admin to see
-            await this.syncUserToFirestore(result.user);
+            if (!user) throw new Error("No user");
 
-            // Reset auth cache on login
+            // Clear cache on login
             this._authCache = null;
 
-            return { user: result.user, token };
+            // Check for existing API Key in Firestore immediately
+            let storedApiKey = '';
+            try {
+                const docSnap = await this.db.collection("users").doc(user.uid).get();
+                if (docSnap.exists) {
+                    const data = docSnap.data();
+                    storedApiKey = data?.geminiApiKey || '';
+                }
+            } catch (e) {
+                console.error("Error fetching user data on login", e);
+            }
+
+            // Sync basics
+            await this.syncUserToFirestore(user);
+
+            return { user, token, apiKey: storedApiKey };
         } catch (error) {
             console.error("Login Failed", error);
             alert("Đăng nhập thất bại: " + (error as any).message);
@@ -86,37 +89,37 @@ class FirebaseService {
     }
 
     async logout() {
-        if (auth) await signOut(auth);
+        await this.auth.signOut();
         this._authCache = null;
     }
 
     get currentUser() {
-        return auth?.currentUser;
+        return this.auth.currentUser;
     }
 
-    // --- USER MANAGEMENT (ADMIN & SYNC) ---
-    private async syncUserToFirestore(user: User) {
-        if (!isConfigured || !db) return;
+    private async syncUserToFirestore(user: firebase.User) {
         try {
-            const userRef = doc(db, "users", user.uid);
-            // Use setDoc with merge to avoid overwriting existing flags like storageEnabled
-            await setDoc(userRef, {
+            const isSysAdmin = user.email === this.ADMIN_EMAIL;
+            await this.db.collection("users").doc(user.uid).set({
                 uid: user.uid,
                 name: user.displayName || 'No Name',
                 email: user.email || 'No Email',
                 avatar: user.photoURL || '',
-                lastLogin: Date.now()
+                lastLogin: Date.now(),
+                // Force admin privileges in DB if needed, but logic handles it dynamically
+                ...(isSysAdmin ? { isActiveAI: true, storageEnabled: true } : {})
             }, { merge: true });
         } catch (e) {
             console.error("Error syncing user to DB", e);
         }
     }
 
-    // Admin Only: Get all users
     async getAllUsers(): Promise<FirestoreUser[]> {
-        if (!isConfigured || !db) return [];
+        // Only admin can do this, theoretically protected by Rules, but client-side check helps UI
+        if (!this.currentUser || this.currentUser.email !== this.ADMIN_EMAIL) return [];
+
         try {
-            const querySnapshot = await getDocs(collection(db, "users"));
+            const querySnapshot = await this.db.collection("users").get();
             const users: FirestoreUser[] = [];
             querySnapshot.forEach((doc) => {
                 users.push(doc.data() as FirestoreUser);
@@ -128,30 +131,37 @@ class FirebaseService {
         }
     }
 
-    // Admin Only: Set API Key for a user
     async updateUserApiKey(targetUid: string, apiKey: string) {
-        if (!isConfigured || !db) return;
+        if (await this.isUserAuthorized()) {
+            try {
+                await this.db.collection("users").doc(targetUid).set({
+                    geminiApiKey: apiKey,
+                    isActiveAI: !!apiKey
+                }, { merge: true });
+                console.log(`Updated API Key for ${targetUid}`);
+            } catch (e) {
+                console.error("Error updating user API key", e);
+            }
+        }
+    }
+
+    async updateUserStatus(uid: string, data: Partial<FirestoreUser>) {
+        if (this.currentUser?.email !== this.ADMIN_EMAIL) return;
         try {
-            const userRef = doc(db, "users", targetUid);
-            await updateDoc(userRef, {
-                geminiApiKey: apiKey,
-                isActiveAI: !!apiKey
-            });
+            await this.db.collection("users").doc(uid).set(data, { merge: true });
         } catch (e) {
-            console.error("Error updating user API key", e);
+            console.error("Error updating user status", e);
             throw e;
         }
     }
 
-    // User: Fetch my assigned API Key
     async getMyAssignedApiKey(uid: string): Promise<string | null> {
-        if (!isConfigured || !db) return null;
+        // Anyone logged in can check their own key
         try {
-            const userRef = doc(db, "users", uid);
-            const docSnap = await getDoc(userRef);
-            if (docSnap.exists()) {
+            const docSnap = await this.db.collection("users").doc(uid).get();
+            if (docSnap.exists) {
                 const data = docSnap.data();
-                return data.geminiApiKey || null;
+                return data?.geminiApiKey || null;
             }
         } catch (e) {
             console.error("Error fetching assigned key", e);
@@ -159,104 +169,81 @@ class FirebaseService {
         return null;
     }
 
-    // --- HYBRID STORAGE STRATEGY ---
-
-    /**
-     * Check if current user is authorized for Cloud Storage
-     * Authorization: Admin email OR storageEnabled flag in Firestore
-     */
     async isUserAuthorized(): Promise<boolean> {
-        if (!auth || !auth.currentUser) return false;
-        const user = auth.currentUser;
+        if (!this.auth.currentUser) return false;
+        const user = this.auth.currentUser;
 
-        // Check Cache first
-        if (this._authCache && this._authCache.uid === user.uid) {
-            return this._authCache.value;
-        }
-
-        // 1. Admin Check (Hardcoded for safety/fallback)
-        if (user.email === 'danghoang.sqtt@gmail.com') {
+        // Admin is ALWAYS authorized immediately
+        if (user.email === this.ADMIN_EMAIL) {
             this._authCache = { uid: user.uid, value: true };
             return true;
         }
 
-        // 2. Firestore Profile Check
-        if (isConfigured && db) {
-            try {
-                const userRef = doc(db, "users", user.uid);
-                const docSnap = await getDoc(userRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const isAuth = data.storageEnabled === true || data.isActiveAI === true; // Support both flags
+        // Cache hit
+        if (this._authCache && this._authCache.uid === user.uid) {
+            return this._authCache.value;
+        }
+
+        try {
+            const docSnap = await this.db.collection("users").doc(user.uid).get();
+            if (docSnap.exists) {
+                const data = docSnap.data();
+                if (data) {
+                    // Authorized if explicitly enabled
+                    const isAuth = data.storageEnabled === true || data.isActiveAI === true;
                     this._authCache = { uid: user.uid, value: isAuth };
                     return isAuth;
                 }
-            } catch (e) {
-                console.warn("Authorization check failed", e);
             }
+        } catch (e) {
+            console.warn("Authorization check failed", e);
         }
 
         this._authCache = { uid: user.uid, value: false };
         return false;
     }
 
-    /**
-     * Load data for a module.
-     * Strategy: Cloud First (if authorized) -> Local Fallback -> Null
-     */
     async getUserData(moduleName: string): Promise<any> {
         const localKey = `dh_${moduleName}`;
 
-        // 1. Try Cloud Read if Authorized
-        if (isConfigured && db && this.currentUser) {
-            const authorized = await this.isUserAuthorized();
-            if (authorized) {
+        // Try fetching cloud if authorized
+        if (this.currentUser) {
+            const isAuth = await this.isUserAuthorized();
+            if (isAuth) {
                 try {
-                    // Path: users/{uid}/modules/{moduleName}
-                    const docRef = doc(db, "users", this.currentUser.uid, "modules", moduleName);
-                    const docSnap = await getDoc(docRef);
-                    if (docSnap.exists()) {
-                        // console.log(`[Cloud] Loaded ${moduleName}`);
-                        const cloudData = docSnap.data().data;
-                        // Update local cache to keep them in sync
-                        localStorage.setItem(localKey, JSON.stringify(cloudData));
-                        return cloudData;
-                    } else {
-                        console.log(`[Cloud] No data for ${moduleName}, falling back to local...`);
+                    const docSnap = await this.db.collection("users").doc(this.currentUser.uid).collection("modules").doc(moduleName).get();
+                    if (docSnap.exists) {
+                        const cloudData = docSnap.data()?.data;
+                        if (cloudData) {
+                            localStorage.setItem(localKey, JSON.stringify(cloudData));
+                            return cloudData;
+                        }
                     }
                 } catch (e) {
-                    console.error(`[Cloud] Load error for ${moduleName}`, e);
+                    console.warn(`[Cloud] Load error for ${moduleName}, falling back to local`, e);
                 }
             }
         }
-
-        // 2. Local Fallback (Guest or Offline or Cloud Empty)
+        // Fallback to local
         const localData = localStorage.getItem(localKey);
         return localData ? JSON.parse(localData) : null;
     }
 
-    /**
-     * Save data for a module.
-     * Strategy: Cloud Write (if authorized) AND Local Write (always, for offline/speed)
-     */
     async saveUserData(moduleName: string, data: any) {
         const localKey = `dh_${moduleName}`;
-
-        // Always save local for offline resilience and speed
+        // Always save local first (Guest Mode compatible)
         localStorage.setItem(localKey, JSON.stringify(data));
 
-        // Try Cloud Write if Authorized
-        if (isConfigured && db && this.currentUser) {
-            const authorized = await this.isUserAuthorized();
-            if (authorized) {
+        // Save to Cloud ONLY if authorized
+        if (this.currentUser) {
+            const isAuth = await this.isUserAuthorized();
+            if (isAuth) {
                 try {
-                    const docRef = doc(db, "users", this.currentUser.uid, "modules", moduleName);
-                    await setDoc(docRef, {
+                    await this.db.collection("users").doc(this.currentUser.uid).collection("modules").doc(moduleName).set({
                         data,
                         updatedAt: Date.now(),
                         module: moduleName
                     }, { merge: true });
-                    // console.log(`[Cloud] Saved ${moduleName}`);
                 } catch (e) {
                     console.error(`[Cloud] Save error for ${moduleName}`, e);
                 }
@@ -264,69 +251,65 @@ class FirebaseService {
         }
     }
 
-    // --- STORAGE (FILES) ---
-    async uploadFile(file: File, path: string = 'courses'): Promise<string> {
-        if (!isConfigured || !storage) {
-            console.log("ℹ️ [Local Mode] File converted to Data URL (not uploaded to cloud)");
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        }
+    async uploadFile(file: File, folder: string = 'courses'): Promise<string> {
+        // Check authorization first
+        const isAuth = await this.isUserAuthorized();
 
-        try {
-            const fileId = Date.now().toString(36);
-            const storageRef = ref(storage, `${path}/${fileId}`);
-            const snapshot = await uploadBytes(storageRef, file);
-            const downloadURL = await getDownloadURL(snapshot.ref);
-            return downloadURL;
-        } catch (error) {
-            console.error("Error uploading file to Firebase:", error);
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
+        if (isAuth && this.auth.currentUser) {
+            try {
+                const fileId = Date.now().toString(36) + '_' + file.name.replace(/[^a-z0-9.]/gi, '_');
+                let storagePath = `demo-uploads/${folder}/${fileId}`;
+
+                const email = this.auth.currentUser.email;
+                if (email === this.ADMIN_EMAIL && folder === 'courses') {
+                    storagePath = `courses/${fileId}`;
+                } else {
+                    storagePath = `users/${this.auth.currentUser.uid}/${folder}/${fileId}`;
+                }
+
+                const storageRef = this.storage.ref(storagePath);
+                const snapshot = await storageRef.put(file);
+                return await snapshot.ref.getDownloadURL();
+            } catch (error) {
+                console.error("Error uploading file to cloud:", error);
+                // Fallback to local blob if cloud upload fails
+                return URL.createObjectURL(file);
+            }
+        } else {
+            // Guest or Unauthorized: Use Local Object URL (Temporary)
+            console.warn("User not authorized for Cloud Storage. Using local Blob URL.");
+            return URL.createObjectURL(file);
         }
     }
 
-    // --- FIRESTORE (Public Course Tree) ---
     async saveCourseTree(tree: CourseNode[]) {
         try {
             localStorage.setItem('dh_course_tree_v2', JSON.stringify(tree));
         } catch (e) {
-            console.warn("LocalStorage full or error", e);
+            console.warn("LocalStorage full", e);
         }
 
-        if (!isConfigured || !db) return;
-
-        try {
-            await setDoc(doc(db, "data", "courseTree"), { tree });
-        } catch (error) {
-            console.error("Error saving course tree to Firestore:", error);
+        // Only Admin can update the public course tree
+        if (this.auth.currentUser?.email === this.ADMIN_EMAIL) {
+            try {
+                await this.db.collection("data").doc("courseTree").set({ tree });
+            } catch (error) {
+                console.error("Error saving course tree:", error);
+            }
         }
     }
 
     async getCourseTree(): Promise<CourseNode[] | null> {
-        if (isConfigured && db) {
-            try {
-                const docRef = doc(db, "data", "courseTree");
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    return docSnap.data().tree as CourseNode[];
-                }
-            } catch (error) {
-                console.error("Error fetching course tree from Firestore:", error);
+        try {
+            const docSnap = await this.db.collection("data").doc("courseTree").get();
+            if (docSnap.exists) {
+                return docSnap.data()?.tree as CourseNode[];
             }
+        } catch (error) {
+            console.error("Error fetching course tree:", error);
         }
         const localData = localStorage.getItem('dh_course_tree_v2');
-        if (localData) {
-            return JSON.parse(localData);
-        }
-        return null;
+        return localData ? JSON.parse(localData) : null;
     }
 }
 
