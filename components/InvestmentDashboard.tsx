@@ -66,7 +66,7 @@ const SimpleMarkdownRenderer = ({ content }: { content: string }) => {
 
                 // Lists
                 if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-                    return <div key={idx} className="flex gap-2 ml-1"><span className="text-indigo-400 font-bold">•</span><span>{parseBold(line.replace(/^[\-\*]\s/, ''))}</span></div>
+                    return <div key={idx} className="flex gap-2 ml-1"><span className="text-indigo-400 font-bold flex-shrink-0 mt-1">•</span><span>{parseBold(line.replace(/^[\-\*]\s/, ''))}</span></div>
                 }
 
                 return <div key={idx}>{parseBold(line)}</div>;
@@ -213,26 +213,32 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
                 ) : (
                     <div className="space-y-6 animate-fade-in">
                         <div className="bg-black/40 rounded-xl p-5 border border-white/10">
-                            <h4 className="text-sm font-bold text-yellow-400 uppercase tracking-wider mb-2">Xu hướng Chủ đạo</h4>
-                            <p className="text-base text-gray-200 leading-relaxed font-medium">{aiResult.marketTrend}</p>
+                            <h4 className="text-sm font-bold text-yellow-400 uppercase tracking-wider mb-2">Phân tích Đa Thị trường (Gold, Forex, Stock, BĐS)</h4>
+                            <div className="text-gray-100 leading-relaxed font-medium">
+                                <SimpleMarkdownRenderer content={aiResult.marketTrend} />
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700">
-                                <h4 className="text-sm font-bold text-blue-400 uppercase mb-3">Dự báo Kinh tế</h4>
-                                <p className="text-sm text-gray-300 leading-relaxed">{aiResult.economicForecast}</p>
+                                <h4 className="text-sm font-bold text-blue-400 uppercase mb-3">Dự báo Kinh tế & Rủi ro</h4>
+                                <div className="text-gray-200 leading-relaxed">
+                                    <SimpleMarkdownRenderer content={aiResult.economicForecast} />
+                                </div>
                             </div>
                             <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700">
-                                <h4 className="text-sm font-bold text-emerald-400 uppercase mb-3">Lời khuyên Đầu tư</h4>
-                                <p className="text-sm text-gray-300 leading-relaxed">{aiResult.investmentAdvice}</p>
+                                <h4 className="text-sm font-bold text-emerald-400 uppercase mb-3">Cơ hội Đầu tư</h4>
+                                <div className="text-gray-200 leading-relaxed">
+                                    <SimpleMarkdownRenderer content={aiResult.investmentAdvice} />
+                                </div>
                             </div>
                         </div>
 
                         {aiResult.actionableSteps && (
-                            <div className="space-y-2">
+                            <div className="space-y-3">
                                 <h4 className="text-sm font-bold text-gray-400 uppercase mb-2">Hành động Khuyến nghị</h4>
                                 {aiResult.actionableSteps.map((step, i) => (
-                                    <div key={i} className="flex gap-3 text-sm text-gray-300 bg-indigo-900/20 p-3 rounded border border-indigo-500/20">
+                                    <div key={i} className="flex gap-3 text-lg text-gray-200 bg-indigo-900/20 p-4 rounded border border-indigo-500/20">
                                         <span className="text-indigo-400 font-bold">{i + 1}.</span>
                                         <span>{step}</span>
                                     </div>

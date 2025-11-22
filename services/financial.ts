@@ -214,28 +214,41 @@ class FinancialService {
       - VN-Index: ${marketData.vnIndex.value}
       - SJC Gold: Sell ${marketData.sjcGold.sell} / Buy ${marketData.sjcGold.buy}
       - World Gold: $${marketData.items.find(i => i.symbol === 'XAU')?.price}/oz
+      - USD/VND: ${marketData.items.find(i => i.symbol === 'USD')?.price}
       `;
 
         const prompt = `
-      Role: Senior Financial Analyst for Vietnam Market.
-      Context: Weekly Market Report.
+      Role: Senior Financial Analyst & Economist for Vietnam Market.
+      Context: Comprehensive Weekly Market Analysis Report.
+      LANGUAGE: VIETNAMESE (Tiếng Việt). All content values MUST be in Vietnamese.
       
       LIVE Data Snapshot:
       ${marketSummary}
       
-      Task: 
-      1. Provide a 'Weekly Market Trend' summary focusing on Gold and Macroeconomics.
-      2. Analyze the gap between Vietnam SJC Gold and World Gold. Is it high or low?
-      3. Provide an 'Economic Forecast' for the upcoming week.
-      4. Give actionable advice for a standard investor holding Gold or Cash.
+      MANDATORY ANALYSIS REQUIREMENTS:
+      You must analyze and provide insights on the following specific topics based on the live data and your general knowledge of the current Vietnam economic context:
+      1. **Gold Market**: Analyze SJC vs World spread, trends.
+      2. **Foreign Exchange (Forex)**: Focus on USD/VND trends.
+      3. **General Economic Market**: Overall sentiment.
+      4. **Vietnam Market**: Specific local factors.
+      5. **Banking Interest Rates**: Trends in Deposit and Lending rates.
+      6. **Real Estate Market**: Trends, liquidity, and price forecast.
+      7. **Stock Market**: VN-Index evaluation and key sectors.
+      8. **Economic Forecast & Risks**: Forecasts, Inflation (CPI) risks, Economic Crisis risks.
+      9. **Investment Opportunities**: Specific actionable opportunities.
 
-      Output JSON Schema:
+      OUTPUT JSON Schema (Keep keys in English, values in Vietnamese using Markdown):
       {
-        "marketTrend": "Summary of the week's major trend.",
-        "economicForecast": "Forecast for next week.",
-        "recommendedAllocation": [], 
-        "investmentAdvice": "Advice regarding Gold accumulation vs selling.",
-        "actionableSteps": ["Step 1", "Step 2", "Step 3"]
+        "marketTrend": "Use Markdown bullet points. Detailed analysis of Gold, Forex, Stocks, and Real Estate trends.",
+        "economicForecast": "Use Markdown bullet points. Detailed forecast on Interest Rates, Inflation Risks, Economic Crisis probabilities, and General Economy.",
+        "recommendedAllocation": [
+            { "name": "Gold", "percentage": 20, "color": "#F59E0B" },
+            { "name": "Stocks", "percentage": 30, "color": "#10B981" },
+            { "name": "Real Estate", "percentage": 30, "color": "#3B82F6" },
+            { "name": "Cash/Savings", "percentage": 20, "color": "#6366F1" }
+        ], 
+        "investmentAdvice": "Use Markdown. Specific investment opportunities and strategy based on the risks analyzed.",
+        "actionableSteps": ["Step 1", "Step 2", "Step 3", "Step 4"]
       }
       `;
 

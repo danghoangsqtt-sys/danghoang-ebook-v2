@@ -327,6 +327,7 @@ export const Courses: React.FC = () => {
     const [courseTree, setCourseTree] = useState<CourseNode[]>([]);
     const [selectedLesson, setSelectedLesson] = useState<LessonContent | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     // Modal
     const [isModalOpen, setModalOpen] = useState(false);
@@ -559,53 +560,65 @@ export const Courses: React.FC = () => {
 
             {/* --- LIST PANE (Master) --- */}
             <div className={`
-         flex-col bg-gray-50 dark:bg-gray-850 border-r border-gray-200 dark:border-gray-800 w-full md:w-80 lg:w-96 shrink-0 h-full z-10 transition-all duration-300
+         flex-col bg-gray-50 dark:bg-gray-850 border-r border-gray-200 dark:border-gray-800 shrink-0 h-full z-10 transition-all duration-300 ease-in-out
          ${selectedLesson ? 'hidden md:flex' : 'flex'}
+         ${isSidebarCollapsed ? 'md:w-0 md:border-r-0 overflow-hidden' : 'w-full md:w-80 lg:w-96'}
       `}>
-                <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 sticky top-0 z-20 flex flex-col gap-3">
-                    <div className="flex justify-between items-center">
-                        <h2 className="font-bold text-lg text-gray-800 dark:text-white flex items-center gap-2">
-                            📚 Khoá học & Tài liệu
-                        </h2>
-                        <button
-                            onClick={() => { resetForm(); setModalOpen(true); }}
-                            className="hidden md:block bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm text-xs font-bold"
-                        >
-                            + Thêm
-                        </button>
-                    </div>
-                    <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-                        <input
-                            type="text"
-                            value={searchQuery}
-                            onChange={e => setSearchQuery(e.target.value)}
-                            placeholder="Tìm bài học, tài liệu..."
-                            className="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-blue-500 dark:text-white transition-all"
-                        />
-                    </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto py-2 custom-scrollbar"
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }} // Prevent root drop by default, allow only into folders or handle root specifically
-                >
-                    {courseTree.length > 0 ? (
-                        courseTree.map(node => (
-                            <TreeItem
-                                key={node.id} node={node} level={0}
-                                selectedLessonId={selectedLesson?.id}
-                                onToggleExpand={(id) => setCourseTree(prev => updateNode(prev, id, { isOpen: !findNode(prev, id)?.isOpen }))}
-                                onSelect={(node) => { if (node.data) setSelectedLesson(node.data); }}
-                                onAction={handleAction}
-                                onMove={handleMoveNode}
-                            />
-                        ))
-                    ) : (
-                        <div className="flex flex-col items-center justify-center h-40 text-gray-400 mt-10">
-                            <span className="text-4xl mb-2 opacity-30">📭</span>
-                            <p className="text-sm">Chưa có tài liệu</p>
+                <div className="min-w-[320px] h-full flex flex-col">
+                    <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 sticky top-0 z-20 flex flex-col gap-3">
+                        <div className="flex justify-between items-center">
+                            <h2 className="font-bold text-lg text-gray-800 dark:text-white flex items-center gap-2">
+                                📚 Khoá học & Tài liệu
+                            </h2>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => { resetForm(); setModalOpen(true); }}
+                                    className="hidden md:block bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm text-xs font-bold"
+                                >
+                                    + Thêm
+                                </button>
+                                <button
+                                    onClick={() => setIsSidebarCollapsed(true)}
+                                    className="hidden md:block text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1"
+                                    title="Thu gọn"
+                                >
+                                    ⇤
+                                </button>
+                            </div>
                         </div>
-                    )}
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                placeholder="Tìm bài học, tài liệu..."
+                                className="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-blue-500 dark:text-white transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto py-2 custom-scrollbar"
+                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }} // Prevent root drop by default, allow only into folders or handle root specifically
+                    >
+                        {courseTree.length > 0 ? (
+                            courseTree.map(node => (
+                                <TreeItem
+                                    key={node.id} node={node} level={0}
+                                    selectedLessonId={selectedLesson?.id}
+                                    onToggleExpand={(id) => setCourseTree(prev => updateNode(prev, id, { isOpen: !findNode(prev, id)?.isOpen }))}
+                                    onSelect={(node) => { if (node.data) setSelectedLesson(node.data); }}
+                                    onAction={handleAction}
+                                    onMove={handleMoveNode}
+                                />
+                            ))
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-40 text-gray-400 mt-10">
+                                <span className="text-4xl mb-2 opacity-30">📭</span>
+                                <p className="text-sm">Chưa có tài liệu</p>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Mobile FAB */}
@@ -619,7 +632,7 @@ export const Courses: React.FC = () => {
 
             {/* --- DETAIL PANE (Viewer) --- */}
             <div className={`
-          flex-col flex-1 bg-gray-100 dark:bg-black relative overflow-hidden
+          flex-col flex-1 bg-gray-100 dark:bg-black relative overflow-hidden transition-all duration-300
           ${selectedLesson ? 'fixed inset-0 z-50 bg-white dark:bg-black flex' : 'hidden md:flex'} 
           md:static md:z-auto
       `}>
@@ -634,6 +647,15 @@ export const Courses: React.FC = () => {
                                 >
                                     ←
                                 </button>
+                                {isSidebarCollapsed && (
+                                    <button
+                                        onClick={() => setIsSidebarCollapsed(false)}
+                                        className="hidden md:flex items-center justify-center w-8 h-8 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                        title="Mở mục lục"
+                                    >
+                                        📑
+                                    </button>
+                                )}
                                 <div className="flex flex-col min-w-0">
                                     {/* Breadcrumbs */}
                                     <div className="flex text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate gap-1">
@@ -669,7 +691,15 @@ export const Courses: React.FC = () => {
                         </div>
                     </>
                 ) : (
-                    <div className="hidden md:flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50 dark:bg-gray-900/50">
+                    <div className="hidden md:flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50 dark:bg-gray-900/50 relative">
+                        {isSidebarCollapsed && (
+                            <button
+                                onClick={() => setIsSidebarCollapsed(false)}
+                                className="absolute top-4 left-4 flex items-center gap-2 text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 px-3 py-2 rounded-lg shadow-md hover:text-blue-600 transition-colors z-10"
+                            >
+                                📑 Mở Mục Lục
+                            </button>
+                        )}
                         <div className="w-20 h-20 bg-gray-200 dark:bg-gray-800 rounded-full flex items-center justify-center text-3xl mb-4 shadow-inner opacity-50">
                             🎓
                         </div>
