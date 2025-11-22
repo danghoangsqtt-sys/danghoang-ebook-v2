@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, PropsWithChildren } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
 import { firebaseService } from '../services/firebase';
@@ -19,7 +18,11 @@ interface ErrorBoundaryState {
     hasError: boolean;
 }
 
-class ErrorBoundary extends React.Component<PropsWithChildren<{}>, ErrorBoundaryState> {
+interface ErrorBoundaryProps {
+    children: React.ReactNode;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
     state: ErrorBoundaryState = { hasError: false };
 
     static getDerivedStateFromError(error: any) {

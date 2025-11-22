@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChatWidget } from './ChatWidget';
+import { Pomodoro } from './Pomodoro';
 import { firebaseService } from '../services/firebase';
 
 // Icons (Using Text/Emoji for simplicity or SVG paths)
@@ -154,7 +155,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </div>
       </main>
 
-      {/* Floating Chat Widget & Pomodoro */}
+      {/* Floating Widgets */}
+      <Pomodoro />
       <ChatWidget />
     </div>
   );
