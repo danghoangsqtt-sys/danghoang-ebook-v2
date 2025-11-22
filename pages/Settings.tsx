@@ -37,7 +37,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         if (this.state.hasError) {
             return <div className="p-6 text-center text-red-500 bg-red-50 rounded-xl m-4">Đã xảy ra lỗi trong phần Cài Đặt. Vui lòng tải lại trang.</div>;
         }
-        return this.props.children;
+        return (this.props as any).children;
     }
 }
 
@@ -381,7 +381,7 @@ export const Settings: React.FC = () => {
                                                         <button
                                                             onClick={checkAndSaveKey}
                                                             disabled={isCheckingKey || !apiKey}
-                                                            className={`px-6 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center gap-2 ${keyStatus === 'valid' ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                                                            className={`px-6 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center gap-2 ${keyStatus === 'valid' ? 'bg-green-50 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
                                                         >
                                                             {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu System Key'}
                                                         </button>

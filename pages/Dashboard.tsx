@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { CourseNode, VocabTerm, Transaction, Task, Habit } from '../types';
 import { firebaseService } from '../services/firebase';
+import { financialService } from '../services/financial';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
@@ -127,89 +128,130 @@ export const Dashboard: React.FC = () => {
     }, []);
 
     const loadDashboardData = async () => {
-        const logs: ActivityLog[] = [];
-        let localVocab: VocabTerm[] = [];
-        let localTasks: Task[] = [];
-        let localTrans: Transaction[] = [];
-        let localHabits: Habit[] = [];
-
-        // Determine Source: Cloud or Local
         const user = firebaseService.currentUser;
+        let statsData = { vocabCount: 0, pendingTasks: 0, financeBalance: 0, activeHabits: 0, habitStreak: 0 };
+
+        let rawVocab: VocabTerm[] = [];
+        let rawTasks: Task[] = [];
+        let rawHabits: Habit[] = [];
+        let rawTrans: Transaction[] = [];
 
         if (user) {
-            // --- Cloud Fetch (Aggregated) ---
+            // CLOUD MODE
             try {
-                const cloudStats = await firebaseService.getGlobalStats(user.uid);
-                setStats({
-                    vocabCount: cloudStats.vocabCount,
-                    pendingTasks: cloudStats.pendingTasks,
-                    financeBalance: cloudStats.financeBalance,
-                    activeHabits: cloudStats.activeHabits,
-                    habitStreak: cloudStats.habitStreak
-                });
+                // 1. Stats Summary (Accurate Balance from all docs)
+                statsData = await firebaseService.getGlobalStats(user.uid);
 
-                // For Charts & Activities, we still try to peek at localStorage for immediate render
-                // In a real world app, we might fetch top N docs from Firestore
+                // 2. Raw Data for Charts/Activity (Fetch specifically)
+                // Use generic getters from firebaseService
+                rawVocab = await firebaseService.getUserData('vocab_terms') || [];
+                rawTasks = await firebaseService.getUserData('tasks') || [];
+                rawHabits = await firebaseService.getUserData('habits') || [];
+
+                // For Transactions, fetch recent 100 via financialService logic or direct DB
+                const result = await financialService.getTransactionsPaged(user.uid, 100);
+                rawTrans = result.data;
+
             } catch (e) {
-                console.error("Failed to fetch cloud stats", e);
+                console.error("Dashboard cloud load error", e);
+            }
+        } else {
+            // LOCAL MODE
+            try {
+                rawVocab = JSON.parse(localStorage.getItem('dh_vocab_terms') || '[]');
+                rawTasks = JSON.parse(localStorage.getItem('dh_tasks') || '[]');
+                rawHabits = JSON.parse(localStorage.getItem('dh_habits') || '[]');
+                rawTrans = JSON.parse(localStorage.getItem('dh_fin_trans') || '[]');
+
+                // Calc Stats Locally
+                statsData.vocabCount = rawVocab.length;
+                statsData.pendingTasks = rawTasks.filter(t => !t.completed).length;
+                statsData.activeHabits = rawHabits.length;
+                statsData.habitStreak = rawHabits.length > 0 ? Math.max(...rawHabits.map(h => h.streak)) : 0;
+                statsData.financeBalance = rawTrans.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
+            } catch (e) {
+                console.error("Dashboard local load error", e);
             }
         }
 
-        // Always load from LocalStorage for charts/activity logs (since other pages cache there)
-        try { localVocab = JSON.parse(localStorage.getItem('dh_vocab_terms') || '[]'); } catch { }
-        try { localTasks = JSON.parse(localStorage.getItem('dh_tasks') || '[]'); } catch { }
-        try { localTrans = JSON.parse(localStorage.getItem('dh_fin_trans') || '[]'); } catch { }
-        try { localHabits = JSON.parse(localStorage.getItem('dh_habits') || '[]'); } catch { }
+        setStats(statsData);
 
-        // If NOT logged in, calculate stats from local
-        if (!user) {
-            const balance = localTrans.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
-            const pending = localTasks.filter(t => !t.completed).length;
-            const activeHabits = localHabits.length;
-            const habitStreak = Math.max(...localHabits.map(h => h.streak), 0);
+        // --- Build Charts & Feed ---
 
-            setStats({
-                vocabCount: localVocab.length,
-                pendingTasks: pending,
-                financeBalance: balance,
-                activeHabits: activeHabits,
-                habitStreak: habitStreak
-            });
-        }
+        // 1. Activity Feed (Mix)
+        const newActivities: ActivityLog[] = [];
 
-        // --- Construct Logs & Charts from Local Cache (Best Effort) ---
-
-        // Vocab Logs
-        localVocab.slice(-5).forEach(t => {
-            if (t.createdAt) logs.push({
-                id: `vocab_${t.id}`, type: 'learning', title: `Học từ: ${t.term}`, subtitle: t.meaning,
-                timestamp: new Date(t.createdAt).getTime(), icon: '🔤', color: 'bg-blue-100 text-blue-600'
+        // Recent Vocab
+        rawVocab.slice(-10).forEach(v => {
+            newActivities.push({
+                id: `vocab_${v.id}`,
+                type: 'learning',
+                title: `Học từ mới: ${v.term}`,
+                subtitle: v.meaning,
+                timestamp: new Date(v.createdAt || Date.now()).getTime(),
+                icon: '🔤',
+                color: 'border-blue-500 text-blue-600 bg-blue-50'
             });
         });
 
-        // Task Activity Chart & Logs
-        const days = [];
+        // Recent Tasks (Completed)
+        rawTasks.filter(t => t.completed).slice(-10).forEach(t => {
+            newActivities.push({
+                id: `task_${t.id}`,
+                type: 'task',
+                title: `Hoàn thành: ${t.title}`,
+                timestamp: new Date(t.date).getTime() + 43200000, // Approximate time (noon)
+                icon: '✅',
+                color: 'border-green-500 text-green-600 bg-green-50'
+            });
+        });
+
+        // Recent Finance
+        rawTrans.slice(0, 15).forEach(t => {
+            newActivities.push({
+                id: `fin_${t.id}`,
+                type: 'finance',
+                title: `${t.type === 'income' ? 'Thu' : 'Chi'}: ${new Intl.NumberFormat('vi-VN').format(t.amount)}đ`,
+                subtitle: t.category,
+                timestamp: new Date(t.date).getTime() + 36000000, // Approximate time (10am)
+                icon: t.type === 'income' ? '💰' : '💸',
+                color: t.type === 'income' ? 'border-green-500 text-green-600 bg-green-50' : 'border-red-500 text-red-600 bg-red-50'
+            });
+        });
+
+        // Sort & Slice Feed
+        newActivities.sort((a, b) => b.timestamp - a.timestamp);
+        setActivities(newActivities.slice(0, 20));
+
+        // 2. Performance Chart (Last 7 Days)
+        const chartData = [];
         for (let i = 6; i >= 0; i--) {
-            const d = new Date(); d.setDate(d.getDate() - i);
-            const dStr = d.toISOString().split('T')[0];
-            const done = localTasks.filter(t => t.date === dStr && t.completed).length;
-            days.push({ name: d.toLocaleDateString('vi-VN', { weekday: 'short' }), completed: done });
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().split('T')[0];
+
+            const tasksDone = rawTasks.filter(t => t.date === dateStr && t.completed).length;
+            const habitsDone = rawHabits.reduce((acc, h) => acc + (h.completedDates.includes(dateStr) ? 1 : 0), 0);
+
+            chartData.push({
+                name: d.toLocaleDateString('vi-VN', { weekday: 'short' }),
+                completed: tasksDone + habitsDone // Metric for area chart
+            });
         }
-        setTaskActivity(days);
+        setTaskActivity(chartData);
 
-        localTasks.filter(t => t.completed).slice(-5).forEach(t => {
-            logs.push({ id: `task_${t.id}`, type: 'task', title: `Xong task: ${t.title}`, timestamp: new Date(t.date).getTime() + 43200000, icon: '✅', color: 'bg-green-100 text-green-600' });
+        // 3. Finance Pie Chart (Expense Breakdown)
+        const expenseMap = new Map<string, number>();
+        rawTrans.filter(t => t.type === 'expense').forEach(t => {
+            expenseMap.set(t.category, (expenseMap.get(t.category) || 0) + t.amount);
         });
+        const pieData = Array.from(expenseMap)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 6); // Top 6 categories
+        setExpenseData(pieData);
 
-        // Finance Chart & Logs
-        const expMap = new Map<string, number>();
-        localTrans.filter(t => t.type === 'expense').forEach(t => expMap.set(t.category, (expMap.get(t.category) || 0) + t.amount));
-        setExpenseData(Array.from(expMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 5));
-
-        localTrans.slice(0, 5).forEach(t => {
-            logs.push({ id: `fin_${t.id}`, type: 'finance', title: `${t.type === 'income' ? 'Thu' : 'Chi'}: ${formatVND(t.amount)}`, subtitle: t.category, timestamp: new Date(t.date).getTime() + 36000000, icon: t.type === 'income' ? '💰' : '💸', color: t.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600' });
-        });
-
+        // 4. System Status & Course Pins
         // Courses
         try {
             const tree: CourseNode[] = JSON.parse(localStorage.getItem('dh_course_tree_v2') || '[]');
@@ -224,14 +266,9 @@ export const Dashboard: React.FC = () => {
             setPinnedCourses(pinned);
         } catch { }
 
-        // Sort Logs
-        logs.sort((a, b) => b.timestamp - a.timestamp);
-        setActivities(logs.slice(0, 15));
-
         // Storage Check
         let total = 0;
         for (const key in localStorage) if (localStorage.hasOwnProperty(key)) total += (localStorage[key].length + key.length) * 2;
-
         const localKey = localStorage.getItem('dh_gemini_api_key');
         const hasActiveKey = !!localKey || (!!process.env.API_KEY && process.env.API_KEY.length > 10);
 

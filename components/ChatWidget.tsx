@@ -621,47 +621,50 @@ export const ChatWidget: React.FC = () => {
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto p-2">
-                                    {Object.entries(groupedSessions).map(([label, group]) => group.length > 0 && (
-                                        <div key={label} className="mb-4">
-                                            <h5 className="px-3 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{label}</h5>
-                                            <div className="space-y-1">
-                                                {group.map(session => (
-                                                    <div
-                                                        key={session.id}
-                                                        onClick={() => selectSession(session.id)}
-                                                        className={`group p-3 rounded-xl cursor-pointer transition-all flex justify-between items-start border border-transparent hover:bg-gray-100 hover:border-gray-200 ${currentSessionId === session.id ? 'bg-blue-50 border-blue-100 ring-1 ring-blue-100' : 'bg-white'}`}
-                                                    >
-                                                        <div className="min-w-0 flex-1 pr-2">
-                                                            {editingSessionId === session.id ? (
-                                                                <form onSubmit={saveTitle} onClick={e => e.stopPropagation()}>
-                                                                    <input
-                                                                        autoFocus
-                                                                        value={editTitle}
-                                                                        onChange={e => setEditTitle(e.target.value)}
-                                                                        onBlur={() => saveTitle()}
-                                                                        className="w-full text-sm font-bold border-b border-blue-500 outline-none bg-transparent text-gray-800"
-                                                                    />
-                                                                </form>
-                                                            ) : (
-                                                                <h4 className={`font-bold text-sm truncate ${currentSessionId === session.id ? 'text-blue-700' : 'text-gray-800'}`}>
-                                                                    {session.title || 'Không tên'}
-                                                                </h4>
-                                                            )}
+                                    {Object.entries(groupedSessions).map(([label, rawGroup]) => {
+                                        const group = rawGroup as ChatSession[];
+                                        return group.length > 0 && (
+                                            <div key={label} className="mb-4">
+                                                <h5 className="px-3 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{label}</h5>
+                                                <div className="space-y-1">
+                                                    {group.map(session => (
+                                                        <div
+                                                            key={session.id}
+                                                            onClick={() => selectSession(session.id)}
+                                                            className={`group p-3 rounded-xl cursor-pointer transition-all flex justify-between items-start border border-transparent hover:bg-gray-100 hover:border-gray-200 ${currentSessionId === session.id ? 'bg-blue-50 border-blue-100 ring-1 ring-blue-100' : 'bg-white'}`}
+                                                        >
+                                                            <div className="min-w-0 flex-1 pr-2">
+                                                                {editingSessionId === session.id ? (
+                                                                    <form onSubmit={saveTitle} onClick={e => e.stopPropagation()}>
+                                                                        <input
+                                                                            autoFocus
+                                                                            value={editTitle}
+                                                                            onChange={e => setEditTitle(e.target.value)}
+                                                                            onBlur={() => saveTitle()}
+                                                                            className="w-full text-sm font-bold border-b border-blue-500 outline-none bg-transparent text-gray-800"
+                                                                        />
+                                                                    </form>
+                                                                ) : (
+                                                                    <h4 className={`font-bold text-sm truncate ${currentSessionId === session.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                                                                        {session.title || 'Không tên'}
+                                                                    </h4>
+                                                                )}
 
-                                                            <p className="text-xs text-gray-500 mt-1 truncate opacity-80">
-                                                                {session.messages.length > 0 ? session.messages[session.messages.length - 1].text : 'Chưa có tin nhắn'}
-                                                            </p>
-                                                        </div>
+                                                                <p className="text-xs text-gray-500 mt-1 truncate opacity-80">
+                                                                    {session.messages.length > 0 ? session.messages[session.messages.length - 1].text : 'Chưa có tin nhắn'}
+                                                                </p>
+                                                            </div>
 
-                                                        <div className="flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <button onClick={(e) => startEditing(e, session)} className="text-gray-400 hover:text-blue-500 p-1" title="Đổi tên">✎</button>
-                                                            <button onClick={(e) => deleteSession(e, session.id)} className="text-gray-400 hover:text-red-500 p-1" title="Xóa">🗑</button>
+                                                            <div className="flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <button onClick={(e) => startEditing(e, session)} className="text-gray-400 hover:text-blue-500 p-1" title="Đổi tên">✎</button>
+                                                                <button onClick={(e) => deleteSession(e, session.id)} className="text-gray-400 hover:text-red-500 p-1" title="Xóa">🗑</button>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        )
+                                    })}
 
                                     {sessions.length === 0 && (
                                         <div className="flex flex-col items-center justify-center h-64 text-gray-400">

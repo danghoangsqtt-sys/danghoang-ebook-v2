@@ -29,7 +29,7 @@ export interface FirestoreUser {
 
 class FirebaseService {
     public auth: firebase.auth.Auth; // Changed to public for direct access
-    private db: firebase.firestore.Firestore;
+    public db: firebase.firestore.Firestore; // Changed to public for dashboard access
     private storage: firebase.storage.Storage;
     private _authCache: { uid: string, value: boolean } | null = null;
     public ADMIN_EMAIL = 'danghoang.sqtt@gmail.com';
@@ -349,13 +349,15 @@ class FirebaseService {
 
         try {
             // 1. Finance: Sum transactions (Income - Expense)
-            // NOTE: This reads docs. In production, use a 'stats' doc.
-            const transSnap = await this.db.collection('users').doc(uid).collection('finance_transactions').get();
+            // Reads from finance_transactions subcollection
+            const transRef = this.db.collection('users').doc(uid).collection('finance_transactions');
+            const transSnap = await transRef.get();
             if (!transSnap.empty) {
                 transSnap.forEach(doc => {
                     const d = doc.data();
-                    if (d.type === 'income') financeBalance += Number(d.amount || 0);
-                    else financeBalance -= Number(d.amount || 0);
+                    const amt = Number(d.amount) || 0;
+                    if (d.type === 'income') financeBalance += amt;
+                    else if (d.type === 'expense') financeBalance -= amt;
                 });
             }
 
@@ -381,7 +383,7 @@ class FirebaseService {
                 const arr = hDoc.data()?.data || [];
                 if (Array.isArray(arr)) {
                     activeHabits = arr.length;
-                    habitStreak = Math.max(...arr.map((h: any) => h.streak || 0), 0);
+                    habitStreak = arr.length > 0 ? Math.max(...arr.map((h: any) => h.streak || 0)) : 0;
                 }
             }
 
