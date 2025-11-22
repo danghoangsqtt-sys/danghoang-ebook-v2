@@ -59,7 +59,7 @@ export const Finance: React.FC = () => {
 
     // --- Modal States ---
     const [isTransModalOpen, setTransModalOpen] = useState(false);
-    const [newTrans, setNewTrans] = useState<Partial<Transaction>>({ type: 'expense', date: new Date().toISOString().split('T')[0], category: 'Ăn uống', amount: 0 });
+    const [newTrans, setNewTrans] = useState<Partial<Transaction>>({ type: 'expense', date: new Date().toISOString().split('T')[0], category: '', amount: 0 });
 
     // AI States
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -159,7 +159,7 @@ export const Finance: React.FC = () => {
         }
 
         setTransModalOpen(false);
-        setNewTrans({ type: 'expense', date: new Date().toISOString().split('T')[0], category: 'Ăn uống', amount: 0, description: '' });
+        setNewTrans({ type: 'expense', date: new Date().toISOString().split('T')[0], category: '', amount: 0, description: '' });
     };
 
     const deleteTransaction = async (id: string) => {
@@ -226,13 +226,49 @@ export const Finance: React.FC = () => {
         return transactions
             .filter(t => {
                 const d = new Date(t.date);
-                const transCat = t.category.toLowerCase();
-                const budgetCat = categoryName.toLowerCase();
-                const isMatch = transCat === budgetCat || transCat.includes(budgetCat);
-                return t.type === 'expense' && isMatch && d.getMonth() === refDate.getMonth() && d.getFullYear() === refDate.getFullYear();
+                const transCat = t.category.toLowerCase().trim();
+                const budgetCat = categoryName.toLowerCase().trim();
+                return t.type === 'expense' && transCat === budgetCat && d.getMonth() === refDate.getMonth() && d.getFullYear() === refDate.getFullYear();
             })
             .reduce((sum, t) => sum + t.amount, 0);
     };
+
+    // --- Helpers for Transaction Modal ---
+    const getAvailableCategories = () => {
+        if (newTrans.type === 'income') return COMMON_CATEGORIES_INCOME;
+
+        // Combine User Budgets with Common Categories for Expenses
+        const budgetNames = budgets
+            .filter(b => b.type === 'expense')
+            .map(b => b.name);
+
+        // Use Set to deduplicate
+        return Array.from(new Set([...budgetNames, ...COMMON_CATEGORIES_EXPENSE]));
+    };
+
+    const getSelectedBudgetPreview = () => {
+        if (newTrans.type !== 'expense' || !newTrans.category) return null;
+
+        const budget = budgets.find(b => b.name.toLowerCase().trim() === newTrans.category?.toLowerCase().trim());
+        if (!budget) return null;
+
+        const currentSpent = calculateBudgetSpent(budget.name);
+        const addingAmount = Number(newTrans.amount) || 0;
+        const newTotal = currentSpent + addingAmount;
+        const percent = Math.min(100, (newTotal / budget.limit) * 100);
+        const isOver = newTotal > budget.limit;
+
+        return {
+            name: budget.name,
+            limit: budget.limit,
+            currentSpent,
+            newTotal,
+            percent,
+            isOver
+        };
+    };
+
+    const budgetPreview = getSelectedBudgetPreview();
 
     // --- Charts ---
     const getBarChartData = () => {
@@ -348,13 +384,13 @@ export const Finance: React.FC = () => {
                 {/* Quick Actions */}
                 <div className="grid grid-cols-2 gap-4">
                     <button
-                        onClick={() => { setNewTrans({ ...newTrans, type: 'income', amount: 0, category: 'Lương' }); setTransModalOpen(true); }}
+                        onClick={() => { setNewTrans({ ...newTrans, type: 'income', amount: 0, category: '' }); setTransModalOpen(true); }}
                         className="flex items-center justify-center gap-2 bg-green-50 hover:bg-green-100 text-green-700 dark:bg-green-900/20 dark:hover:bg-green-900/40 dark:text-green-400 py-3 rounded-xl border border-green-200 dark:border-green-800 font-bold transition-all shadow-sm active:scale-95"
                     >
                         <span className="text-xl">➕</span> Thêm Thu Nhập
                     </button>
                     <button
-                        onClick={() => { setNewTrans({ ...newTrans, type: 'expense', amount: 0, category: 'Ăn uống' }); setTransModalOpen(true); }}
+                        onClick={() => { setNewTrans({ ...newTrans, type: 'expense', amount: 0, category: '' }); setTransModalOpen(true); }}
                         className="flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 py-3 rounded-xl border border-red-200 dark:border-red-800 font-bold transition-all shadow-sm active:scale-95"
                     >
                         <span className="text-xl">➖</span> Thêm Chi Tiêu
@@ -533,6 +569,7 @@ export const Finance: React.FC = () => {
         );
     };
 
+    // ... GoalsTabFull and DebtTabFull remain unchanged ...
     const GoalsTabFull = () => {
         const [isGoalModalOpen, setGoalModalOpen] = useState(false);
         const [editingGoal, setEditingGoal] = useState<FinancialGoal | null>(null);
@@ -805,7 +842,7 @@ export const Finance: React.FC = () => {
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-fade-in-up">
                         <div className="p-4 border-b flex justify-between items-center"><h3 className="font-bold text-lg text-gray-800">Thêm Giao Dịch</h3><button onClick={() => setTransModalOpen(false)} className="text-gray-500">✕</button></div>
                         <div className="p-4 md:p-6 space-y-4">
-                            <div className="flex bg-gray-100 p-1 rounded-xl"><button onClick={() => setNewTrans({ ...newTrans, type: 'income' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Thu Nhập</button><button onClick={() => setNewTrans({ ...newTrans, type: 'expense' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'}`}>Chi Tiêu</button></div>
+                            <div className="flex bg-gray-100 p-1 rounded-xl"><button onClick={() => setNewTrans({ ...newTrans, type: 'income', category: '' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Thu Nhập</button><button onClick={() => setNewTrans({ ...newTrans, type: 'expense', category: '' })} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${newTrans.type === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'}`}>Chi Tiêu</button></div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Số tiền</label>
                                 <MoneyInput value={newTrans.amount || 0} onChange={(val) => setNewTrans({ ...newTrans, amount: val })} className={inputStyle} placeholder="0" autoFocus />
@@ -813,9 +850,31 @@ export const Finance: React.FC = () => {
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Danh mục</label>
                                 <select value={newTrans.category} onChange={e => setNewTrans({ ...newTrans, category: e.target.value })} className={inputStyle}>
-                                    {newTrans.type === 'expense' ? COMMON_CATEGORIES_EXPENSE.map(c => <option key={c} value={c}>{c}</option>) : COMMON_CATEGORIES_INCOME.map(c => <option key={c} value={c}>{c}</option>)}
+                                    <option value="" disabled>-- Chọn danh mục --</option>
+                                    {getAvailableCategories().map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
                             </div>
+
+                            {/* Budget Preview Box */}
+                            {budgetPreview && (
+                                <div className={`rounded-lg p-3 text-xs border ${budgetPreview.isOver ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+                                    <div className="flex justify-between font-bold mb-1">
+                                        <span>{budgetPreview.name}</span>
+                                        <span>{budgetPreview.percent.toFixed(0)}%</span>
+                                    </div>
+                                    <div className="w-full bg-white/50 h-1.5 rounded-full overflow-hidden mb-1">
+                                        <div className={`h-full rounded-full ${budgetPreview.isOver ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${budgetPreview.percent}%` }}></div>
+                                    </div>
+                                    <div className="flex justify-between opacity-80">
+                                        <span>Đã dùng: {formatCurrency(budgetPreview.currentSpent)}</span>
+                                        <span>Hạn mức: {formatCurrency(budgetPreview.limit)}</span>
+                                    </div>
+                                    {budgetPreview.newTotal > budgetPreview.limit && (
+                                        <p className="text-red-600 font-bold mt-1">⚠️ Sẽ vượt hạn mức {formatCurrency(budgetPreview.newTotal - budgetPreview.limit)}</p>
+                                    )}
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Ngày</label><input type="date" value={newTrans.date} onChange={e => setNewTrans({ ...newTrans, date: e.target.value })} className={inputStyle} /></div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Ghi chú</label><input type="text" value={newTrans.description} onChange={e => setNewTrans({ ...newTrans, description: e.target.value })} className={inputStyle} placeholder="Chi tiết..." /></div>
