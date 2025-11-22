@@ -185,7 +185,7 @@ const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onT
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 className={`
-            flex items-center gap-2 py-3 md:py-2 pr-2 cursor-pointer transition-all rounded-lg mx-2 mb-0.5 border border-transparent
+            group flex items-center gap-2 py-3 md:py-2 pr-2 cursor-pointer transition-all rounded-lg mx-2 mb-0.5 border border-transparent
             ${isSelected ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}
             ${isDragOver ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : ''}
           `}
@@ -210,9 +210,9 @@ const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onT
                     )}
                 </div>
 
-                <div className={`flex items-center gap-1 ${window.innerWidth > 768 ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'} transition-opacity`}>
+                <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button onClick={(e) => { e.stopPropagation(); onAction('edit', node); }} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-400 text-xs" title="Sửa / Di chuyển">✏️</button>
-                    <button onClick={(e) => { e.stopPropagation(); onAction('delete', node); }} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500 text-xs" title="Xóa">✕</button>
+                    <button onClick={(e) => { e.stopPropagation(); onAction('delete', node); }} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500 text-xs" title="Xóa">🗑️</button>
                 </div>
             </div>
 
@@ -339,9 +339,17 @@ export const Courses: React.FC = () => {
 
     const handleAction = (action: 'edit' | 'delete' | 'pin', node: CourseNode) => {
         if (action === 'delete') {
-            if (window.confirm(`Xóa "${node.title}" và toàn bộ nội dung bên trong?`)) {
+            let warning = `Xóa "${node.title}"?`;
+            if (node.type === 'folder' && node.children && node.children.length > 0) {
+                warning = `CẢNH BÁO: Thư mục "${node.title}" có chứa ${node.children.length} mục bên trong.\n\nBạn có chắc chắn muốn xóa thư mục này và toàn bộ nội dung không?`;
+            } else {
+                warning = `Bạn có chắc muốn xóa ${node.type === 'folder' ? 'thư mục' : 'file'} "${node.title}" không?`;
+            }
+
+            if (window.confirm(warning)) {
                 setCourseTree(prev => removeNode(prev, node.id));
                 if (selectedLesson?.id === node.id) setSelectedLesson(null);
+                // Note: This deletes from Tree structure. File on cloud/storage might still exist but is unlinked.
             }
         } else if (action === 'pin') {
             setCourseTree(prev => updateNode(prev, node.id, { isPinned: !node.isPinned }));
@@ -583,6 +591,16 @@ export const Courses: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-2">
                                 {selectedLesson.topic && <span className="hidden sm:block text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 py-1 rounded font-bold uppercase">{selectedLesson.topic}</span>}
+                                <button
+                                    onClick={() => {
+                                        const node = findNode(courseTree, selectedLesson.id);
+                                        if (node) handleAction('delete', node);
+                                    }}
+                                    className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
+                                    title="Xóa bài học này"
+                                >
+                                    🗑️
+                                </button>
                             </div>
                         </div>
 
@@ -703,16 +721,31 @@ export const Courses: React.FC = () => {
                         </div>
 
                         {/* Footer */}
-                        <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-2 bg-gray-50 dark:bg-gray-900">
-                            <button onClick={() => setModalOpen(false)} className="px-5 py-2.5 rounded-xl text-gray-500 font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-sm">Hủy</button>
-                            <button
-                                onClick={handleSave}
-                                disabled={isUploading}
-                                className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2 disabled:opacity-70 text-sm"
-                            >
-                                {isUploading && <span className="animate-spin">↻</span>}
-                                {modalMode === 'create' ? (activeTab === 'folder' ? 'Tạo Thư Mục' : 'Tạo Mới') : 'Lưu Thay Đổi'}
-                            </button>
+                        <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
+                            <div>
+                                {modalMode === 'edit' && editNodeId && (
+                                    <button
+                                        onClick={() => {
+                                            const node = findNode(courseTree, editNodeId);
+                                            if (node) { setModalOpen(false); handleAction('delete', node); }
+                                        }}
+                                        className="text-red-500 font-bold text-xs hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                                    >
+                                        🗑️ Xóa bỏ
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setModalOpen(false)} className="px-5 py-2.5 rounded-xl text-gray-500 font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-sm">Hủy</button>
+                                <button
+                                    onClick={handleSave}
+                                    disabled={isUploading}
+                                    className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2 disabled:opacity-70 text-sm"
+                                >
+                                    {isUploading && <span className="animate-spin">↻</span>}
+                                    {modalMode === 'create' ? (activeTab === 'folder' ? 'Tạo Thư Mục' : 'Tạo Mới') : 'Lưu Thay Đổi'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

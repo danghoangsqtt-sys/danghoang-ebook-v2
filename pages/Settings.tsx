@@ -25,7 +25,10 @@ interface ErrorBoundaryState {
 }
 
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-    state: ErrorBoundaryState = { hasError: false };
+    constructor(props: ErrorBoundaryProps) {
+        super(props);
+        this.state = { hasError: false };
+    }
 
     static getDerivedStateFromError(error: any) {
         return { hasError: true };
@@ -37,7 +40,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         if (this.state.hasError) {
             return <div className="p-6 text-center text-red-500 bg-red-50 rounded-xl m-4">Đã xảy ra lỗi trong phần Cài Đặt. Vui lòng tải lại trang.</div>;
         }
-        return (this.props as any).children;
+        return this.props.children;
     }
 }
 
