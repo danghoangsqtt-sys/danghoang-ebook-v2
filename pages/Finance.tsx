@@ -395,6 +395,9 @@ export const Finance: React.FC = () => {
         }, 0);
         const budgetHealthPercent = totalBudgetLimit > 0 ? (budgetedSpent / totalBudgetLimit) * 100 : 0;
 
+        const pieChartData = getPieChartData();
+        const totalPieValue = pieChartData.reduce((acc, item) => acc + item.value, 0);
+
         return (
             <div className="space-y-6 animate-fade-in">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -525,22 +528,44 @@ export const Finance: React.FC = () => {
                             <span>🍰</span> Cơ cấu chi tiêu
                         </h3>
                         <div className="h-64">
-                            {getPieChartData().length > 0 ? (
+                            {pieChartData.length > 0 ? (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
-                                            data={getPieChartData()}
+                                            data={pieChartData}
                                             innerRadius={60}
                                             outerRadius={80}
                                             paddingAngle={5}
                                             dataKey="value"
                                             stroke="none"
                                         >
-                                            {getPieChartData().map((entry, index) => (
+                                            {pieChartData.map((entry, index) => (
                                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                             ))}
                                         </Pie>
-                                        <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                                        <Tooltip
+                                            content={({ active, payload }) => {
+                                                if (active && payload && payload.length) {
+                                                    const data = payload[0].payload;
+                                                    const percent = totalPieValue > 0 ? (data.value / totalPieValue) * 100 : 0;
+                                                    return (
+                                                        <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: data.fill }}></div>
+                                                                <p className="font-bold text-gray-800 dark:text-white text-xs">{data.name}</p>
+                                                            </div>
+                                                            <div className="flex items-baseline gap-2">
+                                                                <span className="text-blue-600 dark:text-blue-400 font-bold text-sm">{formatCurrency(data.value)}</span>
+                                                                <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
+                                                                    {percent.toFixed(1)}%
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            }}
+                                        />
                                     </PieChart>
                                 </ResponsiveContainer>
                             ) : (
