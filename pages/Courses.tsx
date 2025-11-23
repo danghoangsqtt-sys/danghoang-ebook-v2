@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CourseNode, CourseType, LessonContent } from '../types';
 import { firebaseService } from '../services/firebase';
+import { useCourses } from '../hooks/useCourses'; // Import the new hook
 
 // --- Constants ---
 const LEVEL_OPTIONS = ['Cơ bản', 'Trung bình', 'Nâng cao', 'Chuyên sâu'];
@@ -36,7 +37,7 @@ const getSmartUrl = (url: string, type: CourseType) => {
     return url;
 };
 
-// --- Helper: Tree Operations ---
+// --- Helper: Tree Operations (Preserved for Tree View) ---
 const findNode = (nodes: CourseNode[], id: string): CourseNode | null => {
     for (const node of nodes) {
         if (node.id === id) return node;
@@ -322,12 +323,88 @@ const FileViewer: React.FC<{ lesson: LessonContent }> = ({ lesson }) => {
     return <div className="p-10 text-center text-gray-500">Định dạng không hỗ trợ.</div>;
 };
 
+// --- Optimized Feed Component ---
+const OptimizedFeed: React.FC<{ onSelect: (node: CourseNode) => void }> = ({ onSelect }) => {
+    const { courses, loading, error, hasMore, loadMore, refresh } = useCourses();
+
+    return (
+        <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900/50">
+            {/* Feed Toolbar */}
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-white dark:bg-gray-900">
+                <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                    <span>🔥</span> Mới nhất
+                </h3>
+                <button
+                    onClick={refresh}
+                    className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors text-gray-600 dark:text-gray-300"
+                >
+                    Làm mới
+                </button>
+            </div>
+
+            {error && <div className="p-4 text-red-500 text-sm bg-red-50 border-b border-red-100">{error}</div>}
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                {courses.map(course => (
+                    <div
+                        key={course.id}
+                        onClick={() => onSelect(course)}
+                        className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 cursor-pointer transition-all group"
+                    >
+                        <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-xl shrink-0">
+                                {course.data?.type === CourseType.VIDEO ? '🎥' : course.data?.type === CourseType.PDF ? '📄' : '📝'}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <h4 className="font-bold text-sm text-gray-800 dark:text-gray-100 truncate group-hover:text-blue-600">{course.title}</h4>
+                                <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {course.topic && <span className="bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">{course.topic}</span>}
+                                    <span>•</span>
+                                    <span>{new Date(course.createdAt || 0).toLocaleDateString('vi-VN')}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+
+                {loading && (
+                    <div className="flex justify-center py-4">
+                        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                )}
+
+                {!loading && hasMore && (
+                    <button
+                        onClick={loadMore}
+                        className="w-full py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm"
+                    >
+                        Xem thêm 10 bài cũ hơn
+                    </button>
+                )}
+
+                {!loading && !hasMore && courses.length > 0 && (
+                    <p className="text-center text-xs text-gray-400 py-4">Đã hết dữ liệu.</p>
+                )}
+
+                {!loading && courses.length === 0 && !error && (
+                    <div className="text-center py-10 text-gray-400">
+                        <p>Chưa có bài học nào.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // --- Main Page ---
 export const Courses: React.FC = () => {
     const [courseTree, setCourseTree] = useState<CourseNode[]>([]);
     const [selectedLesson, setSelectedLesson] = useState<LessonContent | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+    // View Mode: Tree (Recursive) vs Feed (Flat, Optimized)
+    const [viewMode, setViewMode] = useState<'tree' | 'feed'>('tree');
 
     // Modal
     const [isModalOpen, setModalOpen] = useState(false);
@@ -568,7 +645,7 @@ export const Courses: React.FC = () => {
                     <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 sticky top-0 z-20 flex flex-col gap-3">
                         <div className="flex justify-between items-center">
                             <h2 className="font-bold text-lg text-gray-800 dark:text-white flex items-center gap-2">
-                                📚 Khoá học & Tài liệu
+                                📚 Khoá học
                             </h2>
                             <div className="flex gap-2">
                                 <button
@@ -586,37 +663,63 @@ export const Courses: React.FC = () => {
                                 </button>
                             </div>
                         </div>
-                        <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                placeholder="Tìm bài học, tài liệu..."
-                                className="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-blue-500 dark:text-white transition-all"
-                            />
+
+                        {/* View Mode Switcher */}
+                        <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                            <button
+                                onClick={() => setViewMode('tree')}
+                                className={`flex-1 text-xs font-bold py-1.5 rounded-md transition-all ${viewMode === 'tree' ? 'bg-white dark:bg-gray-700 shadow text-blue-600 dark:text-blue-300' : 'text-gray-500'}`}
+                            >
+                                Thư mục
+                            </button>
+                            <button
+                                onClick={() => setViewMode('feed')}
+                                className={`flex-1 text-xs font-bold py-1.5 rounded-md transition-all ${viewMode === 'feed' ? 'bg-white dark:bg-gray-700 shadow text-blue-600 dark:text-blue-300' : 'text-gray-500'}`}
+                            >
+                                Danh sách
+                            </button>
                         </div>
+
+                        {viewMode === 'tree' && (
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder="Tìm trong cây thư mục..."
+                                    className="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-blue-500 dark:text-white transition-all"
+                                />
+                            </div>
+                        )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto py-2 custom-scrollbar"
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }} // Prevent root drop by default, allow only into folders or handle root specifically
+                    <div className="flex-1 overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-900/50"
+                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }}
                     >
-                        {courseTree.length > 0 ? (
-                            courseTree.map(node => (
-                                <TreeItem
-                                    key={node.id} node={node} level={0}
-                                    selectedLessonId={selectedLesson?.id}
-                                    onToggleExpand={(id) => setCourseTree(prev => updateNode(prev, id, { isOpen: !findNode(prev, id)?.isOpen }))}
-                                    onSelect={(node) => { if (node.data) setSelectedLesson(node.data); }}
-                                    onAction={handleAction}
-                                    onMove={handleMoveNode}
-                                />
-                            ))
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-40 text-gray-400 mt-10">
-                                <span className="text-4xl mb-2 opacity-30">📭</span>
-                                <p className="text-sm">Chưa có tài liệu</p>
+                        {viewMode === 'tree' ? (
+                            <div className="py-2">
+                                {courseTree.length > 0 ? (
+                                    courseTree.map(node => (
+                                        <TreeItem
+                                            key={node.id} node={node} level={0}
+                                            selectedLessonId={selectedLesson?.id}
+                                            onToggleExpand={(id) => setCourseTree(prev => updateNode(prev, id, { isOpen: !findNode(prev, id)?.isOpen }))}
+                                            onSelect={(node) => { if (node.data) setSelectedLesson(node.data); }}
+                                            onAction={handleAction}
+                                            onMove={handleMoveNode}
+                                        />
+                                    ))
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-40 text-gray-400 mt-10">
+                                        <span className="text-4xl mb-2 opacity-30">📭</span>
+                                        <p className="text-sm">Chưa có tài liệu</p>
+                                    </div>
+                                )}
                             </div>
+                        ) : (
+                            /* Use the New Optimized Feed Component */
+                            <OptimizedFeed onSelect={(node) => { if (node.data) setSelectedLesson(node.data); }} />
                         )}
                     </div>
                 </div>

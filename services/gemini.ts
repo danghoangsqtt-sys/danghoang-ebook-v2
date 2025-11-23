@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, LiveServerMessage, Modality, GenerateContentResponse, Chat, Content } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality, GenerateContentResponse, Chat, Content, Type } from "@google/genai";
 import { Transaction } from "../types";
 import { MarketAnalysisResult } from "./financial";
 
@@ -38,6 +38,12 @@ export interface AIFinancialPlan {
   }[];
   analysisComment: string;
   cashflowInsight: string;
+}
+
+export interface SpeakingSuggestion {
+  hints: string[];
+  sampleAnswer: string;
+  vietnameseTranslation: string;
 }
 
 class GeminiService {
@@ -201,11 +207,18 @@ class GeminiService {
     }
   }
 
-  // ... other methods (generateDailyVocabulary, etc.) preserved ...
   async generateDailyVocabulary(level: string, topic?: string) {
     if (!this.ai) throw new Error("No API Key");
     const topicInstruction = topic ? `focusing on the topic: "${topic}"` : 'on general topics';
-    const prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. Return strictly JSON array of objects with term, partOfSpeech, meaning, definition, example.`;
+    const prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. 
+    Return strictly JSON array of objects with:
+    - term: the word
+    - ipa: IPA phonetic transcription (e.g., /həˈləʊ/)
+    - partOfSpeech: noun, verb, etc.
+    - meaning: Vietnamese translation
+    - definition: English definition
+    - example: Example sentence`;
+
     const response = await this.ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
@@ -276,26 +289,133 @@ class GeminiService {
     return response.text || '';
   }
 
-  async connectLive(voiceName: string, onAudio: (data: ArrayBuffer) => void, onTrans: any, sysInstr: string) {
+  // --- Live API with Transcription ---
+  async connectLive(
+    voiceName: string,
+    onAudio: (data: ArrayBuffer) => void,
+    onTranscript: (text: string, isUser: boolean, isFinal: boolean) => void,
+    sysInstr: string
+  ) {
     if (!this.ai) throw new Error("No API Key");
+
+    // System Instruction must be correct Content type
+    const systemInstructionContent = { parts: [{ text: sysInstr }] };
+
     return this.ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-09-2025',
       callbacks: {
         onopen: () => console.log('Live connected'),
         onmessage: (msg: LiveServerMessage) => {
+          // 1. Audio Output
           if (msg.serverContent?.modelTurn?.parts?.[0]?.inlineData) {
             onAudio(base64ToUint8Array(msg.serverContent.modelTurn.parts[0].inlineData.data).buffer);
+          }
+
+          // 2. Transcription Output (Model)
+          if (msg.serverContent?.outputTranscription?.text) {
+            onTranscript(msg.serverContent.outputTranscription.text, false, false);
+          }
+
+          // 3. Transcription Input (User)
+          if (msg.serverContent?.inputTranscription?.text) {
+            onTranscript(msg.serverContent.inputTranscription.text, true, false);
+          }
+
+          // 4. Turn Complete (Signal to process full context)
+          if (msg.serverContent?.turnComplete) {
+            onTranscript("", false, true);
           }
         },
         onclose: () => console.log('Live closed'),
         onerror: (e) => console.error('Live error', e),
       },
       config: {
-        systemInstruction: sysInstr,
+        systemInstruction: systemInstructionContent as any, // Cast if type def mismatch
         responseModalities: [Modality.AUDIO],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || 'Puck' } } }
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: voiceName || 'Puck'
+            }
+          }
+        },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {}
       }
     });
+  }
+
+  // --- Speaking Suggestions ---
+  async generateSpeakingSuggestions(lastAIQuestion: string): Promise<SpeakingSuggestion> {
+    if (!this.ai || !lastAIQuestion) return { hints: [], sampleAnswer: "", vietnameseTranslation: "" };
+
+    const prompt = `
+      You are an English Tutor. The AI interlocutor just said: "${lastAIQuestion}".
+      
+      Task: Help the user reply or answer this.
+      1. Provide 3 short, useful English hints/phrases/vocabulary.
+      2. Provide 1 full, natural Sample Answer (CEFR B2/C1 Level).
+      3. Provide Vietnamese translation for the Sample Answer.
+
+      Output strictly JSON:
+      {
+        "hints": ["hint 1", "hint 2", "hint 3"],
+        "sampleAnswer": "Full text answer...",
+        "vietnameseTranslation": "Dịch câu trả lời mẫu..."
+      }
+      `;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' }
+      });
+      const text = response.text || '{}';
+      return JSON.parse(text.replace(/```json|```/g, '').trim());
+    } catch (e) {
+      console.error("Error generating speaking suggestions", e);
+      return { hints: [], sampleAnswer: "Could not generate suggestions.", vietnameseTranslation: "" };
+    }
+  }
+
+  // --- Monologue Hint Generation (Fixed) ---
+  async generateMonologueScript(topic: string, level: string): Promise<{ script: string, translation: string }> {
+    if (!this.ai) throw new Error("No API Key");
+
+    const prompt = `
+      Role: Professional English Speaking Examiner & Tutor.
+      Task: Generate a model answer (Hint) for a Speaking Part 2/Part 4 Monologue.
+      Topic: "${topic}"
+      Target Level: ${level} (CEFR).
+      
+      Requirements:
+      1. Length: Approximately 10 coherent sentences.
+      2. Content: Concise, focused on the topic, strictly linked ideas.
+      3. Vocabulary: Use high-quality vocabulary suitable for level ${level}.
+      
+      Output strictly valid JSON with the following structure:
+      {
+        "script": "The full English monologue text...",
+        "translation": "The Vietnamese translation..."
+      }
+      `;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json'
+          // Removing strict schema object to avoid parsing errors with creative tasks
+        }
+      });
+      const text = response.text || '{}';
+      return JSON.parse(text.replace(/```json|```/g, '').trim());
+    } catch (e) {
+      console.error("Error generating monologue script", e);
+      return { script: "Error generating script. Please try again.", translation: "" };
+    }
   }
 }
 

@@ -162,3 +162,12 @@ export interface UserProfile {
   email?: string;
   accessToken?: string; // Google OAuth Access Token
 }
+
+// --- Speaking History ---
+export interface SpeakingSession {
+  id: string;
+  timestamp: number;
+  durationSeconds: number;
+  transcript: { role: 'user' | 'model'; text: string }[];
+  suggestions: any[]; // Array of SpeakingSuggestion
+}

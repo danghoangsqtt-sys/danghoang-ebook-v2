@@ -6,6 +6,7 @@ import { firebaseService } from '../services/firebase';
 // Default Data
 const DEFAULT_FOLDERS: VocabFolder[] = [
     { id: 'root', name: 'Thư mục gốc', parentId: null },
+    { id: 'folder_vocab_general', name: 'Vocab', parentId: 'root' },
     { id: 'reading', name: 'Reading Practice', parentId: 'root' },
     { id: 'speaking', name: 'Speaking Practice', parentId: 'root' },
     { id: 'writing', name: 'Writing Task', parentId: 'root' },

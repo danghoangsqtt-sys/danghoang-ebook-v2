@@ -22,6 +22,15 @@ const SECURITY_LOGS = [
     { id: 'sec_3', ip: '113.160.22.11', action: 'Unauthorized Upload', status: 'Blocked', location: 'Da Nang, VN', time: '1 hour ago', level: 'danger' },
 ];
 
+// Firebase Spark Plan Limits (Free Tier)
+const QUOTA_LIMITS = {
+    firestoreReads: 50000, // Daily
+    firestoreWrites: 20000, // Daily
+    firestoreStorage: 1024, // MB (1 GiB)
+    hostingBandwidth: 360,  // MB/day (Conservative estimate from user prompt)
+    storageFiles: 5120,     // MB (5 GB)
+};
+
 // --- STYLED COMPONENTS ---
 const Card: React.FC<{ children: React.ReactNode, className?: string }> = ({ children, className }) => (
     <div className={`bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm ${className}`}>
@@ -37,6 +46,27 @@ const Badge: React.FC<{ type: 'success' | 'warning' | 'danger' | 'neutral', chil
         neutral: 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600',
     };
     return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${colors[type]}`}>{children}</span>;
+};
+
+const ProgressBar: React.FC<{ value: number, max: number, label: string, unit?: string }> = ({ value, max, label, unit = '' }) => {
+    const percent = Math.min(100, (value / max) * 100);
+    let colorClass = 'bg-blue-500';
+    if (percent > 70) colorClass = 'bg-yellow-500';
+    if (percent > 90) colorClass = 'bg-red-500';
+
+    return (
+        <div className="mb-4">
+            <div className="flex justify-between mb-1">
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{label}</span>
+                <span className={`text-xs font-bold ${percent > 90 ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                    {value.toLocaleString()} / {max.toLocaleString()} {unit} ({percent.toFixed(1)}%)
+                </span>
+            </div>
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                <div className={`h-2.5 rounded-full transition-all duration-500 ${colorClass}`} style={{ width: `${percent}%` }}></div>
+            </div>
+        </div>
+    );
 };
 
 // --- MAIN COMPONENT ---
@@ -63,6 +93,15 @@ export const Management: React.FC = () => {
         isRunning: false,
         lastRun: null as number | null,
         logs: [] as string[]
+    });
+
+    // Usage Quota State (Simulated Real-time)
+    const [usageStats, setUsageStats] = useState({
+        reads: 34200,
+        writes: 12500,
+        storage: 850, // MB
+        bandwidth: 150, // MB
+        files: 2100 // MB
     });
 
     // Security State
@@ -130,6 +169,21 @@ export const Management: React.FC = () => {
         }, 2000);
         return () => clearInterval(interval);
     }, [activeTab, realStats.totalUsers]);
+
+    // Usage Stats Simulation (Live)
+    useEffect(() => {
+        if (activeTab !== 'system') return;
+        const interval = setInterval(() => {
+            setUsageStats(prev => ({
+                reads: prev.reads + Math.floor(Math.random() * 5),
+                writes: prev.writes + Math.floor(Math.random() * 2),
+                bandwidth: prev.bandwidth + (Math.random() * 0.1),
+                storage: prev.storage,
+                files: prev.files
+            }));
+        }, 3000);
+        return () => clearInterval(interval);
+    }, [activeTab]);
 
     // Handlers
     const runDiagnostics = async () => {
@@ -258,86 +312,127 @@ export const Management: React.FC = () => {
         </div>
     );
 
-    const SystemHealthView = () => (
-        <div className="space-y-6 animate-fade-in">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
-                    <div className="flex justify-between items-center">
-                        <h3 className="text-xl font-bold text-gray-800 dark:text-white">Diagnostics Console</h3>
-                        <button
-                            onClick={runDiagnostics}
-                            disabled={diagnostics.isRunning}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/30 transition-all flex items-center gap-2 active:scale-95"
-                        >
-                            {diagnostics.isRunning ? <span className="animate-spin">↻</span> : '▶'} Run Full Diagnostics
-                        </button>
+    const SystemHealthView = () => {
+        const activeAlerts = [];
+        if ((usageStats.reads / QUOTA_LIMITS.firestoreReads) > 0.8) activeAlerts.push("High Read Volume");
+        if ((usageStats.storage / QUOTA_LIMITS.firestoreStorage) > 0.9) activeAlerts.push("Firestore Storage Critical");
+        if ((usageStats.bandwidth / QUOTA_LIMITS.hostingBandwidth) > 0.8) activeAlerts.push("Bandwidth limit nearing");
+
+        return (
+            <div className="space-y-6 animate-fade-in">
+                {/* Alerts Section */}
+                {activeAlerts.length > 0 && (
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 flex items-start gap-3 animate-bounce-up">
+                        <span className="text-2xl">🚨</span>
+                        <div>
+                            <h4 className="font-bold text-red-800 dark:text-red-300 text-sm">Critical System Alerts</h4>
+                            <ul className="list-disc list-inside text-xs text-red-700 dark:text-red-400 mt-1">
+                                {activeAlerts.map((alert, i) => <li key={i}>{alert} - Check quota immediately.</li>)}
+                            </ul>
+                        </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Quota Management Panel */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <Card className="p-6">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                                    <span>📊</span> Resource Usage (Spark Plan)
+                                </h3>
+                                <div className="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-mono text-gray-500">
+                                    Reset in: 04:23:11
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div>
+                                    <h4 className="text-xs font-bold text-gray-400 uppercase mb-4 tracking-wider border-b border-gray-100 dark:border-gray-700 pb-2">Database (Firestore)</h4>
+                                    <ProgressBar value={usageStats.reads} max={QUOTA_LIMITS.firestoreReads} label="Reads (Daily)" />
+                                    <ProgressBar value={usageStats.writes} max={QUOTA_LIMITS.firestoreWrites} label="Writes (Daily)" />
+                                    <ProgressBar value={usageStats.storage} max={QUOTA_LIMITS.firestoreStorage} label="Stored Data" unit="MB" />
+                                </div>
+                                <div>
+                                    <h4 className="text-xs font-bold text-gray-400 uppercase mb-4 tracking-wider border-b border-gray-100 dark:border-gray-700 pb-2">Hosting & Storage</h4>
+                                    <ProgressBar value={usageStats.bandwidth} max={QUOTA_LIMITS.hostingBandwidth} label="Bandwidth (Daily)" unit="MB" />
+                                    <ProgressBar value={usageStats.files} max={QUOTA_LIMITS.storageFiles} label="Cloud Storage (Files)" unit="MB" />
+                                    <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg mt-6 text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                        ℹ️ <b>Tip:</b> Optimize images before upload to save bandwidth. Daily quotas reset at midnight Pacific Time.
+                                    </div>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-white">Diagnostics Console</h3>
+                            <button
+                                onClick={runDiagnostics}
+                                disabled={diagnostics.isRunning}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/30 transition-all flex items-center gap-2 active:scale-95"
+                            >
+                                {diagnostics.isRunning ? <span className="animate-spin">↻</span> : '▶'} Run Full Diagnostics
+                            </button>
+                        </div>
+
+                        {/* Terminal Output */}
+                        <div className="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-xs h-48 overflow-y-auto border border-gray-700 shadow-inner">
+                            {diagnostics.logs.length === 0 ? (
+                                <span className="opacity-50">Waiting to run diagnostics...</span>
+                            ) : (
+                                diagnostics.logs.map((line, i) => <div key={i} className="mb-1">{line}</div>)
+                            )}
+                            {diagnostics.isRunning && <div className="animate-pulse">_</div>}
+                        </div>
                     </div>
 
-                    {/* Terminal Output */}
-                    <div className="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-xs h-64 overflow-y-auto border border-gray-700 shadow-inner">
-                        {diagnostics.logs.length === 0 ? (
-                            <span className="opacity-50">Waiting to run diagnostics...</span>
-                        ) : (
-                            diagnostics.logs.map((line, i) => <div key={i} className="mb-1">{line}</div>)
-                        )}
-                        {diagnostics.isRunning && <div className="animate-pulse">_</div>}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        {/* DB Latency */}
+                    {/* Side Panel */}
+                    <div className="space-y-6">
                         <Card className="p-6 flex flex-col items-center justify-center text-center">
                             <div className={`w-16 h-16 rounded-full border-4 flex items-center justify-center text-lg font-bold mb-2 transition-colors ${!diagnostics.lastRun ? 'border-gray-200 text-gray-400' : diagnostics.dbLatency < 200 ? 'border-green-500 text-green-600' : 'border-orange-500 text-orange-600'}`}>
                                 {diagnostics.lastRun ? `${diagnostics.dbLatency}ms` : '--'}
                             </div>
                             <h4 className="font-bold text-gray-800 dark:text-white text-sm">DB Latency</h4>
+                            <p className="text-xs text-gray-500 mt-1">Region: asia-southeast1</p>
                         </Card>
 
-                        {/* API Status */}
-                        <Card className="p-6 flex flex-col items-center justify-center text-center">
-                            <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl mb-2 transition-all ${!diagnostics.lastRun ? 'bg-gray-100 text-gray-400' : diagnostics.apiStatus === 'Valid' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                                {diagnostics.lastRun ? (diagnostics.apiStatus === 'Valid' ? '✓' : '✕') : '?'}
+                        <Card className="p-6 flex flex-col">
+                            <h4 className="font-bold text-gray-800 dark:text-white mb-4">Local Storage</h4>
+                            <div className="flex-1 flex flex-col justify-center items-center">
+                                <div className="relative w-40 h-40">
+                                    <svg className="w-full h-full" viewBox="0 0 36 36">
+                                        <path
+                                            className="text-gray-200 dark:text-gray-700"
+                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="3"
+                                        />
+                                        <path
+                                            className="text-indigo-600"
+                                            strokeDasharray={`${((diagnostics.storageUsed / 5242880) * 100)}, 100`}
+                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="3"
+                                        />
+                                    </svg>
+                                    <div className="absolute inset-0 flex items-center justify-center flex-col">
+                                        <span className="text-2xl font-bold text-gray-800 dark:text-white">{((diagnostics.storageUsed / 5242880) * 100).toFixed(1)}%</span>
+                                        <span className="text-[10px] text-gray-500 uppercase">Used</span>
+                                    </div>
+                                </div>
+                                <div className="mt-6 text-center">
+                                    <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{(diagnostics.storageUsed / 1024).toFixed(1)} KB / 5 MB</p>
+                                    <p className="text-xs text-gray-500 mt-1">Browser Limit</p>
+                                </div>
                             </div>
-                            <h4 className="font-bold text-gray-800 dark:text-white text-sm">API Gateway</h4>
                         </Card>
                     </div>
                 </div>
-
-                {/* Storage Panel */}
-                <Card className="p-6 flex flex-col">
-                    <h4 className="font-bold text-gray-800 dark:text-white mb-4">Storage Usage</h4>
-                    <div className="flex-1 flex flex-col justify-center items-center">
-                        <div className="relative w-40 h-40">
-                            <svg className="w-full h-full" viewBox="0 0 36 36">
-                                <path
-                                    className="text-gray-200 dark:text-gray-700"
-                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="3"
-                                />
-                                <path
-                                    className="text-indigo-600"
-                                    strokeDasharray={`${((diagnostics.storageUsed / 5242880) * 100)}, 100`}
-                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="3"
-                                />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center flex-col">
-                                <span className="text-2xl font-bold text-gray-800 dark:text-white">{((diagnostics.storageUsed / 5242880) * 100).toFixed(1)}%</span>
-                                <span className="text-[10px] text-gray-500 uppercase">Used</span>
-                            </div>
-                        </div>
-                        <div className="mt-6 text-center">
-                            <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{(diagnostics.storageUsed / 1024).toFixed(1)} KB / 5 MB</p>
-                            <p className="text-xs text-gray-500 mt-1">Local Storage Limit</p>
-                        </div>
-                    </div>
-                </Card>
             </div>
-        </div>
-    );
+        );
+    };
 
     const SecurityView = () => {
         const filteredLogs = secLogs.filter(l => {
@@ -429,7 +524,7 @@ export const Management: React.FC = () => {
                 {[
                     { id: 'overview', label: 'Overview', icon: '📊' },
                     { id: 'users', label: 'Users', icon: '👥' },
-                    { id: 'system', label: 'System Health', icon: '⚡' },
+                    { id: 'system', label: 'Resources & Quotas', icon: '⚡' },
                     { id: 'security', label: 'Security', icon: '🔒' }
                 ].map(tab => (
                     <button

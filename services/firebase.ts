@@ -4,7 +4,7 @@ import "firebase/compat/auth";
 import "firebase/compat/firestore";
 import "firebase/compat/storage";
 import { initializeFirestore, persistentLocalCache } from "firebase/firestore";
-import { CourseNode } from "../types";
+import { CourseNode, SpeakingSession } from "../types";
 
 // Cấu hình Firebase
 const firebaseConfig = {
@@ -306,6 +306,45 @@ class FirebaseService {
                 }
             }
         }
+    }
+
+    async saveSpeakingSession(session: SpeakingSession) {
+        // Save Local
+        const localKey = 'dh_speaking_sessions';
+        const current = JSON.parse(localStorage.getItem(localKey) || '[]');
+        current.unshift(session);
+        localStorage.setItem(localKey, JSON.stringify(current.slice(0, 50))); // Keep last 50 locally
+
+        // Save Cloud
+        if (this.currentUser && await this.isUserAuthorized()) {
+            try {
+                await this.db.collection("users").doc(this.currentUser.uid).collection("speaking_history").add(session);
+            } catch (e) {
+                console.error("Error saving speaking session to cloud", e);
+            }
+        }
+    }
+
+    async getSpeakingSessions(): Promise<SpeakingSession[]> {
+        // Load Cloud
+        if (this.currentUser && await this.isUserAuthorized()) {
+            try {
+                const snapshot = await this.db.collection("users").doc(this.currentUser.uid)
+                    .collection("speaking_history")
+                    .orderBy("timestamp", "desc")
+                    .limit(20)
+                    .get();
+
+                if (!snapshot.empty) {
+                    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SpeakingSession));
+                }
+            } catch (e) {
+                console.error("Error fetching speaking sessions", e);
+            }
+        }
+        // Fallback Local
+        const localKey = 'dh_speaking_sessions';
+        return JSON.parse(localStorage.getItem(localKey) || '[]');
     }
 
     async uploadFile(file: File, folder: string = 'courses'): Promise<string> {
