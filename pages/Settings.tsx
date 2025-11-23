@@ -23,7 +23,10 @@ interface ErrorBoundaryProps {
 }
 
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-    state: ErrorBoundaryState = { hasError: false };
+    constructor(props: ErrorBoundaryProps) {
+        super(props);
+        this.state = { hasError: false };
+    }
 
     static getDerivedStateFromError(error: any) {
         return { hasError: true };
@@ -245,7 +248,15 @@ export const Settings: React.FC = () => {
         const backup: Record<string, any> = {};
         DATA_KEYS.forEach(key => {
             const val = localStorage.getItem(key);
-            if (val) backup[key] = JSON.parse(val);
+            if (val) {
+                try {
+                    // Attempt to parse JSON. Some items like API keys or themes might be plain strings.
+                    backup[key] = JSON.parse(val);
+                } catch (e) {
+                    // If parse fails (e.g. simple string like 'AIza...'), store as is
+                    backup[key] = val;
+                }
+            }
         });
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup));
         const downloadAnchorNode = document.createElement('a');
@@ -267,7 +278,13 @@ export const Settings: React.FC = () => {
                 let count = 0;
                 Object.keys(json).forEach(key => {
                     if (DATA_KEYS.includes(key)) {
-                        localStorage.setItem(key, JSON.stringify(json[key]));
+                        const val = json[key];
+                        // If value is object/array, stringify it. If primitive string, store as is.
+                        if (typeof val === 'object') {
+                            localStorage.setItem(key, JSON.stringify(val));
+                        } else {
+                            localStorage.setItem(key, val.toString());
+                        }
                         count++;
                     }
                 });
