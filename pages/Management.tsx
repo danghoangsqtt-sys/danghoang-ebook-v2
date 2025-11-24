@@ -219,8 +219,8 @@ export const Management: React.FC = () => {
                 <div>
                     <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">Thông tin Gói cước (Firebase Spark + Vercel Hobby)</h4>
                     <p className="text-xs text-blue-700 dark:text-blue-200 mt-1 leading-relaxed">
-                        Hệ thống đang chạy trên các gói miễn phí. Số liệu dưới đây là ước tính dựa trên hoạt động thực tế của {stats.totalUsers} người dùng. 
-                        Nếu thanh tiến trình chuyển sang màu đỏ (>80%), hãy cân nhắc nâng cấp lên gói Blaze.
+                        Hệ thống đang chạy trên các gói miễn phí. Số liệu dưới đây là ước tính dựa trên hoạt động thực tế của {stats.totalUsers} người dùng.
+                        Nếu thanh tiến trình chuyển sang màu đỏ (&gt;80%), hãy cân nhắc nâng cấp lên gói Blaze.
                     </p>
                 </div>
             </div>
