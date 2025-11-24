@@ -211,8 +211,13 @@ export const Finance: React.FC = () => {
         try {
             const plan = await geminiService.analyzeFinances(transactions);
             setAiPlan(plan);
-        } catch (e) {
-            alert("Lỗi phân tích AI: " + (e as any).message);
+        } catch (e: any) {
+            // Check for policy enforcement message
+            if (e.message.includes('🔒')) {
+                alert(e.message);
+            } else {
+                alert("Lỗi phân tích AI: " + e.message);
+            }
         } finally {
             setIsAnalyzing(false);
         }
@@ -234,8 +239,8 @@ export const Finance: React.FC = () => {
             setAiPlan(null);
             alert("Đã áp dụng kế hoạch tài chính mới!");
             handleRefresh(); // Refresh to show new budgets/goals
-        } catch (e) {
-            alert("Lỗi khi lưu kế hoạch: " + (e as any).message);
+        } catch (e: any) {
+            alert("Lỗi khi lưu kế hoạch: " + e.message);
         }
     };
 

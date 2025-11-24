@@ -52,6 +52,7 @@ export const Settings: React.FC = () => {
     const [profile, setProfile] = useState<UserProfile>({ name: 'Khách', avatar: '👨‍💻', email: '' });
     const [isAdmin, setIsAdmin] = useState(false);
     const [isAuthorized, setIsAuthorized] = useState(false);
+    const [adminZalo, setAdminZalo] = useState('0343019101'); // Default
 
     // AI Key State
     const [apiKey, setApiKey] = useState('');
@@ -112,8 +113,6 @@ export const Settings: React.FC = () => {
                 if (savedProfile) {
                     try {
                         const p = JSON.parse(savedProfile);
-                        // Only use saved profile if it looks like a guest profile or we want offline support
-                        // For now, if no auth user, we reset to Guest to avoid confusion
                         setProfile({ name: 'Khách', avatar: '👨‍💻', email: '' });
                     } catch (e) {
                         setProfile({ name: 'Khách', avatar: '👨‍💻', email: '' });
@@ -134,6 +133,13 @@ export const Settings: React.FC = () => {
         // Listen for auth changes
         const unsub = firebaseService.auth.onAuthStateChanged(async (user) => {
             syncProfile(user);
+        });
+
+        // Get System Config (Zalo)
+        firebaseService.getSystemConfig().then(config => {
+            if (config && config.zaloNumber) {
+                setAdminZalo(config.zaloNumber);
+            }
         });
 
         calculateStorage();
@@ -418,7 +424,7 @@ export const Settings: React.FC = () => {
                                                     Vui lòng liên hệ Admin để kích hoạt quyền sử dụng AI và mở khóa tính năng tự nhập API Key.
                                                 </p>
                                                 <a
-                                                    href="https://zalo.me/0343019101"
+                                                    href={`https://zalo.me/${adminZalo}`}
                                                     target="_blank"
                                                     rel="noreferrer"
                                                     className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-bold shadow-lg transform transition-all hover:scale-105 flex items-center gap-2"

@@ -239,7 +239,7 @@ const VocabAndGrammarModule = ({ level, onSaveVocab }: { level: string, onSaveVo
             const questions = JSON.parse(jsonStr.replace(/```json|```/g, '').trim());
             setGrammarQuestions(questions);
             setSubTab('grammar_ai');
-        } catch (e) { alert("Lỗi tạo đề thi. Vui lòng thử lại."); } finally { setIsProcessing(false); }
+        } catch (e: any) { alert(e.message || "Lỗi tạo đề thi. Vui lòng thử lại."); } finally { setIsProcessing(false); }
     };
 
     const handleGradeQuiz = async () => {
@@ -251,7 +251,7 @@ const VocabAndGrammarModule = ({ level, onSaveVocab }: { level: string, onSaveVo
             const jsonStr = await geminiService.gradeGrammarQuiz(level, grammarQuestions, userAnswers);
             const result = JSON.parse(jsonStr.replace(/```json|```/g, '').trim());
             setGrammarResult(result);
-        } catch (e) { alert("Lỗi chấm điểm."); } finally { setIsProcessing(false); }
+        } catch (e: any) { alert(e.message || "Lỗi chấm điểm."); } finally { setIsProcessing(false); }
     };
 
     const handleGenerateVocab = async () => {
@@ -267,7 +267,7 @@ const VocabAndGrammarModule = ({ level, onSaveVocab }: { level: string, onSaveVo
             setDailyCount(prev => prev + newWords.length);
             setVocabSubMode('generate');
             setSubTab('vocab_ai');
-        } catch (e) { alert("Lỗi tạo từ vựng."); } finally { setIsProcessing(false); }
+        } catch (e: any) { alert(e.message || "Lỗi tạo từ vựng."); } finally { setIsProcessing(false); }
     };
 
     const loadReviewTerms = () => {
@@ -456,14 +456,14 @@ const WritingModule = ({ level, onSaveVocab }: { level: string, onSaveVocab: (w:
             const duration = type === 'task1' ? 20 * 60 : 40 * 60;
             setTimerDuration(duration);
             setTimer(duration);
-        } catch (e) { alert("Lỗi tạo đề bài."); } finally { setIsGeneratingTopic(false); }
+        } catch (e: any) { alert(e.message || "Lỗi tạo đề bài."); } finally { setIsGeneratingTopic(false); }
     };
 
     const handleGrade = async () => {
         if (!topic.trim() || !essay.trim()) { alert("Vui lòng nhập đề bài và bài làm."); return; }
         setIsGrading(true); setResult(null); setIsTimerRunning(false);
         try { const jsonStr = await geminiService.gradeWritingPractice(level, topic, essay); setResult(JSON.parse(jsonStr.replace(/```json|```/g, '').trim())); setActiveResultTab('score'); }
-        catch (e) { alert("Có lỗi khi chấm điểm."); } finally { setIsGrading(false); }
+        catch (e: any) { alert(e.message || "Có lỗi khi chấm điểm."); } finally { setIsGrading(false); }
     };
 
     const handleSave = (word: string, mean: string, ctx: string) => { onSaveVocab(word, mean, "Writing Practice", "writing"); setSavedWords(prev => new Set(prev).add(word)); };
@@ -523,7 +523,7 @@ const ReadingModule = ({ level, onSaveVocab }: { level: string, onSaveVocab: (w:
             const json = await geminiService.generateReadingPassage(level, aiTopic);
             setReadingData(JSON.parse(json.replace(/```json|```/g, '').trim()));
             setReadingMode('ai_reader');
-        } catch (e) { alert("Lỗi tạo bài đọc."); } finally { setIsGenerating(false); }
+        } catch (e: any) { alert(e.message || "Lỗi tạo bài đọc."); } finally { setIsGenerating(false); }
     };
 
     const handleLookup = async () => {
@@ -536,7 +536,9 @@ const ReadingModule = ({ level, onSaveVocab }: { level: string, onSaveVocab: (w:
                 const context = readingData?.content?.substring(0, 200) || "";
                 const json = await geminiService.lookupDictionary(selection, context);
                 setLookupResult(JSON.parse(json.replace(/```json|```/g, '').trim()));
-            } catch (e) { } finally { setIsLookingUp(false); }
+            } catch (e: any) {
+                if (e.message.includes('🔒')) alert(e.message);
+            } finally { setIsLookingUp(false); }
         }
     };
 
@@ -748,9 +750,13 @@ const SpeakingPractice = ({ level, onSaveVocab }: { level: string, onSaveVocab: 
 
             setIsLive(true);
             setIsConnecting(false);
-        } catch (e) {
-            console.error(e);
-            alert("Không thể kết nối Micro hoặc API. Vui lòng thử lại.");
+        } catch (e: any) {
+            if (e.message.includes('🔒')) {
+                alert(e.message);
+            } else {
+                console.error(e);
+                alert("Không thể kết nối Micro hoặc API. Vui lòng thử lại.");
+            }
             setIsConnecting(false);
             setIsLive(false);
         }

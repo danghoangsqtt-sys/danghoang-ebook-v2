@@ -2,6 +2,7 @@
 import { GoogleGenAI, LiveServerMessage, Modality, GenerateContentResponse, Chat, Content, Type } from "@google/genai";
 import { Transaction } from "../types";
 import { MarketAnalysisResult } from "./financial";
+import { firebaseService } from "./firebase";
 
 export function floatTo16BitPCM(input: Float32Array): ArrayBuffer {
   const output = new Int16Array(input.length);
@@ -125,6 +126,41 @@ class GeminiService {
     }
   }
 
+  // --- POLICY ENFORCEMENT ---
+  private async enforcePolicy() {
+    const user = firebaseService.auth.currentUser;
+
+    // Admin Bypass
+    if (user && user.email === firebaseService.ADMIN_EMAIL) return;
+
+    // Helper to get Zalo Contact
+    let zaloNumber = "0343019101";
+    try {
+      const config = await firebaseService.getSystemConfig();
+      if (config && config.zaloNumber) {
+        zaloNumber = config.zaloNumber;
+      }
+    } catch (e) { }
+
+    const contactMsg = `Vui lòng liên hệ Admin qua zalo: ${zaloNumber} để mở khóa tính năng AI và nhiều tiện ích đa dạng khác của website.`;
+
+    // 1. Block Guests
+    if (!user) {
+      throw new Error(`🔒 Vui lòng đăng nhập để sử dụng tính năng AI.\n\n${contactMsg}`);
+    }
+
+    // 2. Block Unauthorized Users (Pending)
+    const isAuth = await firebaseService.isUserAuthorized();
+    if (!isAuth) {
+      throw new Error(`🔒 Tài khoản chưa kích hoạt.\n\n${contactMsg}`);
+    }
+
+    // 3. Check API Key existence (Double check)
+    if (!this.apiKey) {
+      throw new Error("Vui lòng nhập API Key trong phần Cài đặt (Ưu tiên OpenAI/ChatGPT Key).");
+    }
+  }
+
   // --- OPENAI ADAPTER HELPER ---
   private async callOpenAI(prompt: string, jsonMode: boolean = false, systemInstruction?: string): Promise<string> {
     const messages = [];
@@ -154,7 +190,7 @@ class GeminiService {
   }
 
   async analyzeFinances(transactions: Transaction[]): Promise<AIFinancialPlan> {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
 
     const recentTrans = transactions.slice(0, 100).map(t => ({
       date: t.date,
@@ -208,7 +244,7 @@ class GeminiService {
   }
 
   async analyzeMarket(prompt: string): Promise<MarketAnalysisResult> {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     try {
       let text = '';
       if (this.provider === 'openai') {
@@ -229,7 +265,7 @@ class GeminiService {
   }
 
   async searchContent(prompt: string): Promise<string> {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     try {
       if (this.provider === 'openai') {
         // OpenAI does not support Google Search grounding directly. 
@@ -256,7 +292,7 @@ class GeminiService {
     message: string,
     systemInstruction: string
   ) {
-    if (!this.apiKey) throw new Error("AI not initialized");
+    await this.enforcePolicy();
 
     if (this.provider === 'openai') {
       // OpenAI Adapter for Streaming
@@ -333,7 +369,7 @@ class GeminiService {
   }
 
   async generateDailyVocabulary(level: string, topic?: string) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const topicInstruction = topic ? `focusing on the topic: "${topic}"` : 'on general topics';
     const prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. 
     Return strictly JSON array of objects with:
@@ -357,7 +393,7 @@ class GeminiService {
   }
 
   async gradeWritingPractice(level: string, question: string, userEssay: string) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const prompt = `Grade essay Level ${level}. Question: ${question}. Essay: ${userEssay}. Return JSON {score, generalFeedback, corrections: [{original, correction, explanation}], sampleEssay, betterVocab}.`;
 
     if (this.provider === 'openai') {
@@ -373,7 +409,7 @@ class GeminiService {
   }
 
   async generateGrammarQuiz(level: string, topic?: string) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const prompt = `Generate 10 Grammar Questions Level ${level} ${topic ? `about ${topic}` : ''}. Return strictly JSON array.`;
 
     if (this.provider === 'openai') {
@@ -389,7 +425,7 @@ class GeminiService {
   }
 
   async gradeGrammarQuiz(level: string, questions: any[], userAnswers: any) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const prompt = `Grade Grammar Quiz Level ${level}. Questions: ${JSON.stringify(questions)}. User Answers: ${JSON.stringify(userAnswers)}. Return JSON {score, results: [{id, isCorrect, explanation}]}.`;
 
     if (this.provider === 'openai') {
@@ -405,7 +441,7 @@ class GeminiService {
   }
 
   async generateReadingPassage(level: string, topic: string) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const prompt = `Write reading passage Level ${level} about "${topic}". Return JSON {title, content, summary, keywords}.`;
 
     if (this.provider === 'openai') {
@@ -421,7 +457,7 @@ class GeminiService {
   }
 
   async lookupDictionary(word: string, context: string) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const prompt = `Define "${word}" in context: "${context}". Return JSON {word, ipa, type, meaning_vi, definition_en, example}.`;
 
     if (this.provider === 'openai') {
@@ -437,7 +473,7 @@ class GeminiService {
   }
 
   async generateWritingTopic(level: string, type: 'task1' | 'task2') {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
     const prompt = `Generate Writing Topic ${type} Level ${level}. Return text only.`;
 
     if (this.provider === 'openai') {
@@ -455,7 +491,7 @@ class GeminiService {
     onTranscript: (text: string, isUser: boolean, isFinal: boolean) => void,
     sysInstr: string
   ) {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
 
     if (this.provider === 'openai') {
       throw new Error("OpenAI Key detected. Live API (Realtime Audio) is currently only available with Google Gemini API Keys.");
@@ -510,7 +546,8 @@ class GeminiService {
 
   // --- Speaking Suggestions ---
   async generateSpeakingSuggestions(lastAIQuestion: string): Promise<SpeakingSuggestion> {
-    if (!this.apiKey || !lastAIQuestion) return { hints: [], sampleAnswer: "", vietnameseTranslation: "" };
+    await this.enforcePolicy();
+    if (!lastAIQuestion) return { hints: [], sampleAnswer: "", vietnameseTranslation: "" };
 
     const prompt = `
       You are an English Tutor. The AI interlocutor just said: "${lastAIQuestion}".
@@ -549,7 +586,7 @@ class GeminiService {
 
   // --- Monologue Hint Generation (Fixed) ---
   async generateMonologueScript(topic: string, level: string): Promise<{ script: string, translation: string }> {
-    if (!this.apiKey) throw new Error("No API Key");
+    await this.enforcePolicy();
 
     const prompt = `
       Role: Professional English Speaking Examiner & Tutor.

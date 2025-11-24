@@ -299,12 +299,10 @@ export const ChatWidget: React.FC = () => {
         const textToSend = textOverride || input;
         if (!textToSend.trim()) return;
 
+        // Client-side pre-check for Key (to avoid unnecessary calls if obviously missing)
+        // However, the real check is in geminiService.enforcePolicy()
         if (!geminiService.hasKey()) {
             checkKey();
-            if (!geminiService.hasKey()) {
-                updateCurrentSessionMessages(prev => [...prev, { role: 'model', text: "Vui lòng nhập API Key trong Cài Đặt để sử dụng tính năng này." }]);
-                return;
-            }
         }
 
         const userMsg: ChatMessage = { role: 'user', text: textToSend };
@@ -407,14 +405,17 @@ export const ChatWidget: React.FC = () => {
                 });
             }
 
-        } catch (error) {
-            console.error(error);
+        } catch (error: any) {
+            console.error("Chat Error:", error);
             updateCurrentSessionMessages(prev => {
                 const last = prev[prev.length - 1];
+                // Remove the empty placeholder if it was model thinking
                 if (last.role === 'model' && !last.text) return prev.slice(0, -1);
                 return prev;
             });
-            updateCurrentSessionMessages(prev => [...prev, { role: 'model', text: "Hic, Nana bị mất kết nối rùi. Thử lại nha!" }]);
+
+            const errorMsg = error.message || "Hic, Nana bị mất kết nối rùi. Thử lại nha!";
+            updateCurrentSessionMessages(prev => [...prev, { role: 'model', text: errorMsg }]);
         } finally {
             setLoading(false);
         }
@@ -441,7 +442,7 @@ export const ChatWidget: React.FC = () => {
     };
 
     const startLive = async () => {
-        if (apiKeyMissing) return alert("Vui lòng nhập API Key trong Cài Đặt.");
+        // Note: enforcePolicy inside connectLive will handle blocking
 
         try {
             setIsLiveConnected(true);
@@ -481,9 +482,14 @@ export const ChatWidget: React.FC = () => {
             source.connect(processorRef.current);
             processorRef.current.connect(inputCtx.destination);
 
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            alert("Lỗi kết nối Live. Kiểm tra Micro.");
+            // If permission denied or locked
+            if (e.message.includes('🔒')) {
+                alert(e.message);
+            } else {
+                alert("Lỗi kết nối Live. Kiểm tra Micro hoặc API Key.");
+            }
             stopLive();
         }
     };
@@ -577,7 +583,7 @@ export const ChatWidget: React.FC = () => {
                                             </button>
                                             <button
                                                 onClick={() => setIsSpeakingMode(!isSpeakingMode)}
-                                                className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-full border transition-colors ${isSpeakingMode ? 'bg-green-500 text-white border-green-400' : 'bg-blue-800 text-blue-200 border-blue-700'}`}
+                                                className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-full border transition-colors ${isSpeakingMode ? 'bg-green-50 text-white border-green-400' : 'bg-blue-800 text-blue-200 border-blue-700'}`}
                                             >
                                                 {isSpeakingMode ? '🎤 Mic' : '⌨️ Text'}
                                             </button>

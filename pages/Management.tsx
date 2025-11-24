@@ -73,6 +73,7 @@ export const Management: React.FC = () => {
 
     const [dbStatus, setDbStatus] = useState<'Online' | 'Slow' | 'Offline'>('Online');
     const [secLogs, setSecLogs] = useState(SECURITY_LOGS);
+    const [zaloNumber, setZaloNumber] = useState('0343019101');
 
     // Auth Check & Data Load
     useEffect(() => {
@@ -97,10 +98,6 @@ export const Management: React.FC = () => {
                 const activeAI = users.filter(u => u.isActiveAI).length;
 
                 // ESTIMATION ALGORITHM for Spark Plan Usage
-                // 1 User ≈ 0.5MB data (Profile + settings + 100 transactions + vocab)
-                // Daily Reads ≈ Users * 30 (Login + Fetch Finance + Fetch Vocab)
-                // Daily Writes ≈ Users * 5 (Add Transaction + Update progress)
-
                 const estimatedStorage = total * 0.5;
                 const dailyReads = total * 35 + 100; // +100 system overhead
                 const dailyWrites = total * 8 + 20;
@@ -117,6 +114,12 @@ export const Management: React.FC = () => {
                 const health = await firebaseService.checkHealth();
                 setDbStatus(health.status === 'ok' ? 'Online' : health.status === 'degraded' ? 'Slow' : 'Offline');
 
+                // Get Config
+                const config = await firebaseService.getSystemConfig();
+                if (config && config.zaloNumber) {
+                    setZaloNumber(config.zaloNumber);
+                }
+
             } catch (e) {
                 console.error("Failed to load admin stats", e);
             } finally {
@@ -125,6 +128,19 @@ export const Management: React.FC = () => {
         };
         checkAccessAndLoad();
     }, [navigate]);
+
+    const handleChangeZalo = async () => {
+        const newNum = prompt("Nhập số Zalo Admin mới:", zaloNumber);
+        if (newNum && newNum !== zaloNumber) {
+            try {
+                await firebaseService.updateSystemConfig({ zaloNumber: newNum });
+                setZaloNumber(newNum);
+                alert("Đã cập nhật số Zalo Admin thành công!");
+            } catch (e) {
+                alert("Lỗi khi cập nhật số Zalo.");
+            }
+        }
+    };
 
     if (isLoading) return (
         <div className="flex h-[calc(100vh-100px)] items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -338,6 +354,12 @@ export const Management: React.FC = () => {
                         <h4 className="font-bold text-gray-800 dark:text-white mb-3">Cấu hình Admin</h4>
                         <button className="w-full py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-200 mb-2 transition-colors text-left px-4">
                             🔑 Đổi mật khẩu Admin
+                        </button>
+                        <button
+                            onClick={handleChangeZalo}
+                            className="w-full py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded-lg text-xs font-bold text-blue-600 dark:text-blue-400 mb-2 transition-colors text-left px-4"
+                        >
+                            📞 Đổi số Zalo Admin ({zaloNumber})
                         </button>
                         <button className="w-full py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-200 transition-colors text-left px-4">
                             📜 Xuất Log hệ thống

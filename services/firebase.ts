@@ -469,6 +469,30 @@ class FirebaseService {
             return { dbLatency: 0, status: 'offline' };
         }
     }
+
+    // --- SYSTEM CONFIGURATION ---
+    async getSystemConfig() {
+        try {
+            const doc = await this.db.collection('system').doc('public').get();
+            if (doc.exists) {
+                return doc.data();
+            }
+            return null;
+        } catch (e) {
+            console.error("Error fetching system config", e);
+            return null;
+        }
+    }
+
+    async updateSystemConfig(data: any) {
+        if (this.currentUser?.email !== this.ADMIN_EMAIL) throw new Error("Unauthorized");
+        try {
+            await this.db.collection('system').doc('public').set(data, { merge: true });
+        } catch (e) {
+            console.error("Error updating system config", e);
+            throw e;
+        }
+    }
 }
 
 export const firebaseService = new FirebaseService();
