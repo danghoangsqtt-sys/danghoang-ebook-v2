@@ -175,6 +175,19 @@ class FirebaseService {
         }
     }
 
+    async removeUserApiKey(targetUid: string) {
+        if (this.currentUser?.uid === targetUid || await this.isUserAuthorized()) {
+            try {
+                await this.db.collection("users").doc(targetUid).update({
+                    geminiApiKey: firebase.firestore.FieldValue.delete(),
+                });
+            } catch (e) {
+                console.error("Error removing user API key", e);
+                throw e;
+            }
+        }
+    }
+
     async updateUserStatus(uid: string, data: Partial<FirestoreUser>) {
         if (this.currentUser?.email !== this.ADMIN_EMAIL) return;
         try {

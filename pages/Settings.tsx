@@ -58,6 +58,7 @@ export const Settings: React.FC = () => {
     const [showKey, setShowKey] = useState(false);
     const [isCheckingKey, setIsCheckingKey] = useState(false);
     const [keyStatus, setKeyStatus] = useState<'unknown' | 'valid' | 'invalid'>('unknown');
+    const [isEditingKey, setIsEditingKey] = useState(false); // Toggle between View/Edit mode
 
     // Voice Settings State
     const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
@@ -198,8 +199,27 @@ export const Settings: React.FC = () => {
                     console.warn("Failed to sync key to cloud", e);
                 }
             }
+            setIsEditingKey(false);
         } else {
             showToast("API Key không hoạt động. Vui lòng kiểm tra lại.");
+        }
+    };
+
+    const handleRemoveKey = async () => {
+        if (window.confirm("Bạn có chắc muốn xóa API Key này không? Nana sẽ không thể trả lời bạn nữa.")) {
+            geminiService.removeApiKey();
+            setApiKey('');
+            setKeyStatus('unknown');
+            setIsEditingKey(false);
+
+            if (profile.uid) {
+                try {
+                    await firebaseService.removeUserApiKey(profile.uid);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+            showToast("Đã xóa API Key.");
         }
     };
 
@@ -344,28 +364,48 @@ export const Settings: React.FC = () => {
                                             // --- ADMIN VIEW ---
                                             <div className="bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-xl p-6">
                                                 <div className="mb-0">
-                                                    <label className="text-sm font-bold text-gray-700 dark:text-gray-200 block mb-2">System-wide Gemini API Key (Admin)</label>
-                                                    <div className="flex gap-2">
-                                                        <div className="relative flex-1">
-                                                            <input
-                                                                type={showKey ? "text" : "password"}
-                                                                value={apiKey}
-                                                                onChange={(e) => setApiKey(e.target.value)}
-                                                                className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-10 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors"
-                                                                placeholder="Paste your System API Key here..."
-                                                            />
-                                                            <button onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                                                {showKey ? '🙈' : '👁️'}
-                                                            </button>
-                                                        </div>
-                                                        <button
-                                                            onClick={checkAndSaveKey}
-                                                            disabled={isCheckingKey || !apiKey}
-                                                            className={`px-6 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center gap-2 ${keyStatus === 'valid' ? 'bg-green-50 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
-                                                        >
-                                                            {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu System Key'}
-                                                        </button>
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <label className="text-sm font-bold text-gray-700 dark:text-gray-200 block">System-wide Gemini API Key (Admin)</label>
+                                                        {keyStatus === 'valid' && !isEditingKey && (
+                                                            <button onClick={() => setIsEditingKey(true)} className="text-xs text-blue-600 hover:underline font-bold">Chỉnh sửa</button>
+                                                        )}
                                                     </div>
+
+                                                    {keyStatus === 'valid' && !isEditingKey ? (
+                                                        <div className="flex items-center gap-3 bg-white dark:bg-gray-700 p-3 rounded-xl border border-gray-200 dark:border-gray-600">
+                                                            <div className="flex-1 font-mono text-sm text-gray-600 dark:text-gray-300 tracking-widest">
+                                                                {apiKey.substring(0, 8)}******************
+                                                            </div>
+                                                            <button onClick={handleRemoveKey} className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded text-red-500 text-sm" title="Xóa Key">🗑️</button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            <div className="relative">
+                                                                <input
+                                                                    type={showKey ? "text" : "password"}
+                                                                    value={apiKey}
+                                                                    onChange={(e) => setApiKey(e.target.value)}
+                                                                    className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-10 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors"
+                                                                    placeholder="Paste your System API Key here..."
+                                                                />
+                                                                <button onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                                                    {showKey ? '🙈' : '👁️'}
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <button
+                                                                    onClick={checkAndSaveKey}
+                                                                    disabled={isCheckingKey || !apiKey}
+                                                                    className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm flex justify-center items-center gap-2 ${keyStatus === 'valid' && isEditingKey ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50'}`}
+                                                                >
+                                                                    {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu System Key'}
+                                                                </button>
+                                                                {isEditingKey && (
+                                                                    <button onClick={() => { setIsEditingKey(false); setApiKey(localStorage.getItem('dh_gemini_api_key') || ''); }} className="px-4 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl font-bold text-sm">Hủy</button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     <p className="text-xs text-gray-500 mt-2">* Key này sẽ được dùng cho toàn bộ hệ thống.</p>
                                                 </div>
                                             </div>
@@ -389,57 +429,89 @@ export const Settings: React.FC = () => {
                                         ) : (
                                             // --- AUTHORIZED USER VIEW (GUIDE + INPUT) ---
                                             <div className="space-y-6 animate-fade-in">
-                                                {/* Step-by-Step Guide */}
-                                                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl p-6">
-                                                    <h3 className="font-bold text-blue-800 dark:text-blue-300 text-lg mb-4 flex items-center gap-2">
-                                                        <span>🔑</span> Hướng dẫn lấy Key trong 30 giây
-                                                    </h3>
-                                                    <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
-                                                        <div className="flex gap-3 items-start">
-                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
-                                                            <p>
-                                                                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-600 font-bold hover:underline">Bấm vào đây</a> để mở trang Google AI Studio.
+                                                {keyStatus !== 'valid' || isEditingKey ? (
+                                                    <>
+                                                        {/* Step-by-Step Guide */}
+                                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl p-6">
+                                                            <h3 className="font-bold text-blue-800 dark:text-blue-300 text-lg mb-4 flex items-center gap-2">
+                                                                <span>🔑</span> Hướng dẫn lấy Key trong 30 giây
+                                                            </h3>
+                                                            <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+                                                                <div className="flex gap-3 items-start">
+                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
+                                                                    <p>
+                                                                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-600 font-bold hover:underline">Bấm vào đây</a> để mở trang Google AI Studio.
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex gap-3 items-start">
+                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
+                                                                    <p>Đăng nhập bằng Gmail của bạn ➝ Bấm nút xanh <b>[Create API key]</b>.</p>
+                                                                </div>
+                                                                <div className="flex gap-3 items-start">
+                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
+                                                                    <p>Chọn <b>[Create API key in new project]</b> ➝ Chờ một chút rồi bấm <b>[Copy]</b>.</p>
+                                                                </div>
+                                                                <div className="flex gap-3 items-start">
+                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
+                                                                    <p>Quay lại đây và dán vào ô bên dưới ⬇️</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Input Area */}
+                                                        <div>
+                                                            <div className="relative flex flex-col sm:flex-row gap-2">
+                                                                <div className="relative flex-1">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={apiKey}
+                                                                        onChange={(e) => setApiKey(e.target.value)}
+                                                                        className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-4 py-3 text-sm focus:ring-2 focus:ring-green-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors font-mono"
+                                                                        placeholder="Dán mã key bắt đầu bằng AIza... vào đây"
+                                                                    />
+                                                                </div>
+                                                                <div className="flex gap-2">
+                                                                    <button
+                                                                        onClick={checkAndSaveKey}
+                                                                        disabled={isCheckingKey || apiKey.length < 20}
+                                                                        className={`px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 ${keyStatus === 'valid' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                                                                    >
+                                                                        {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu & Đồng bộ'}
+                                                                    </button>
+                                                                    {isEditingKey && (
+                                                                        <button onClick={() => { setIsEditingKey(false); setApiKey(localStorage.getItem('dh_gemini_api_key') || ''); }} className="px-4 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl font-bold text-sm">Hủy</button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <p className="text-xs text-gray-400 mt-2 ml-1">
+                                                                * Key của bạn được lưu an toàn trên thiết bị và đồng bộ với tài khoản Google của riêng bạn.
                                                             </p>
                                                         </div>
-                                                        <div className="flex gap-3 items-start">
-                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
-                                                            <p>Đăng nhập bằng Gmail của bạn ➝ Bấm nút xanh <b>[Create API key]</b>.</p>
+                                                    </>
+                                                ) : (
+                                                    // View Mode
+                                                    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm">
+                                                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                                            <div>
+                                                                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">API Key cá nhân</h4>
+                                                                <div className="font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-lg text-sm tracking-wider">
+                                                                    {apiKey.substring(0, 8)}******************
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => setIsEditingKey(true)} className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-300 rounded-xl font-bold text-sm transition-colors flex items-center gap-1">
+                                                                    <span>✏️</span> Sửa
+                                                                </button>
+                                                                <button onClick={handleRemoveKey} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 rounded-xl font-bold text-sm transition-colors flex items-center gap-1">
+                                                                    <span>🗑️</span> Xóa
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                        <div className="flex gap-3 items-start">
-                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
-                                                            <p>Chọn <b>[Create API key in new project]</b> ➝ Chờ một chút rồi bấm <b>[Copy]</b>.</p>
-                                                        </div>
-                                                        <div className="flex gap-3 items-start">
-                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
-                                                            <p>Quay lại đây và dán vào ô bên dưới ⬇️</p>
-                                                        </div>
+                                                        <p className="text-xs text-green-600 mt-3 flex items-center gap-1 font-medium">
+                                                            <span className="w-2 h-2 bg-green-500 rounded-full"></span> Đang hoạt động
+                                                        </p>
                                                     </div>
-                                                </div>
-
-                                                {/* Input Area */}
-                                                <div>
-                                                    <div className="relative flex items-center gap-2">
-                                                        <div className="relative flex-1">
-                                                            <input
-                                                                type="text"
-                                                                value={apiKey}
-                                                                onChange={(e) => setApiKey(e.target.value)}
-                                                                className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-4 py-3 text-sm focus:ring-2 focus:ring-green-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors font-mono"
-                                                                placeholder="Dán mã key bắt đầu bằng AIza... vào đây"
-                                                            />
-                                                        </div>
-                                                        <button
-                                                            onClick={checkAndSaveKey}
-                                                            disabled={isCheckingKey || apiKey.length < 20}
-                                                            className={`px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center gap-2 ${keyStatus === 'valid' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
-                                                        >
-                                                            {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu & Đồng bộ'}
-                                                        </button>
-                                                    </div>
-                                                    <p className="text-xs text-gray-400 mt-2 ml-1">
-                                                        * Key của bạn được lưu an toàn trên thiết bị và đồng bộ với tài khoản Google của riêng bạn.
-                                                    </p>
-                                                </div>
+                                                )}
                                             </div>
                                         )}
                                     </section>

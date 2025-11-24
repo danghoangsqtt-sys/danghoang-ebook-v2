@@ -79,6 +79,15 @@ class GeminiService {
     this.initializeModel(newKey);
   }
 
+  public removeApiKey() {
+    this.apiKey = '';
+    this.ai = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('dh_gemini_api_key');
+    }
+    console.log("🤖 AI Model Credential Removed");
+  }
+
   public hasKey(): boolean {
     return !!this.ai;
   }
