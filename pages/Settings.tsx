@@ -413,9 +413,9 @@ export const Settings: React.FC = () => {
                                             // --- UNAUTHORIZED USER VIEW (LOCKED) ---
                                             <div className="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6 flex flex-col items-center text-center animate-fade-in">
                                                 <div className="text-5xl mb-4">🔒</div>
-                                                <h3 className="text-xl font-bold text-yellow-800 mb-2">Tính năng AI đang khóa</h3>
+                                                <h3 className="text-xl font-bold text-yellow-800 mb-2">Tính năng AI đang chờ cấp quyền</h3>
                                                 <p className="text-sm text-yellow-700 mb-6 max-w-md">
-                                                    Vui lòng liên hệ Admin để mở khóa tính năng Trợ lý ảo Nana (Luyện nói, Chấm bài) và Lưu trữ đám mây.
+                                                    Vui lòng liên hệ Admin để kích hoạt quyền sử dụng AI và mở khóa tính năng tự nhập API Key.
                                                 </p>
                                                 <a
                                                     href="https://zalo.me/0343019101"
@@ -423,7 +423,7 @@ export const Settings: React.FC = () => {
                                                     rel="noreferrer"
                                                     className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-bold shadow-lg transform transition-all hover:scale-105 flex items-center gap-2"
                                                 >
-                                                    <span>💬</span> Liên hệ Zalo: 0343019101
+                                                    <span>💬</span> Liên hệ Admin (Zalo)
                                                 </a>
                                             </div>
                                         ) : (
@@ -432,28 +432,28 @@ export const Settings: React.FC = () => {
                                                 {keyStatus !== 'valid' || isEditingKey ? (
                                                     <>
                                                         {/* Step-by-Step Guide */}
-                                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl p-6">
-                                                            <h3 className="font-bold text-blue-800 dark:text-blue-300 text-lg mb-4 flex items-center gap-2">
-                                                                <span>🔑</span> Hướng dẫn lấy Key trong 30 giây
+                                                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 rounded-2xl p-6">
+                                                            <h3 className="font-bold text-green-800 dark:text-green-300 text-lg mb-4 flex items-center gap-2">
+                                                                <span>🤖</span> Hướng dẫn lấy OpenAI API Key (ChatGPT)
                                                             </h3>
                                                             <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
+                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
                                                                     <p>
-                                                                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-600 font-bold hover:underline">Bấm vào đây</a> để mở trang Google AI Studio.
+                                                                        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-green-600 font-bold hover:underline">Bấm vào đây</a> để mở trang OpenAI Platform.
                                                                     </p>
                                                                 </div>
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
-                                                                    <p>Đăng nhập bằng Gmail của bạn ➝ Bấm nút xanh <b>[Create API key]</b>.</p>
+                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
+                                                                    <p>Đăng nhập tài khoản ChatGPT của bạn ➝ Bấm <b>[Create new secret key]</b>.</p>
                                                                 </div>
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
-                                                                    <p>Chọn <b>[Create API key in new project]</b> ➝ Chờ một chút rồi bấm <b>[Copy]</b>.</p>
+                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
+                                                                    <p>Đặt tên tùy ý (VD: NanaAI) ➝ Copy mã Key bắt đầu bằng <code>sk-...</code>.</p>
                                                                 </div>
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
-                                                                    <p>Quay lại đây và dán vào ô bên dưới ⬇️</p>
+                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
+                                                                    <p>Quay lại đây và dán vào ô bên dưới. (Hệ thống cũng hỗ trợ Gemini Key nếu bạn có).</p>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -467,13 +467,13 @@ export const Settings: React.FC = () => {
                                                                         value={apiKey}
                                                                         onChange={(e) => setApiKey(e.target.value)}
                                                                         className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-4 py-3 text-sm focus:ring-2 focus:ring-green-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors font-mono"
-                                                                        placeholder="Dán mã key bắt đầu bằng AIza... vào đây"
+                                                                        placeholder="Dán key vào đây (sk-... hoặc AIza...)"
                                                                     />
                                                                 </div>
                                                                 <div className="flex gap-2">
                                                                     <button
                                                                         onClick={checkAndSaveKey}
-                                                                        disabled={isCheckingKey || apiKey.length < 20}
+                                                                        disabled={isCheckingKey || apiKey.length < 10}
                                                                         className={`px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 ${keyStatus === 'valid' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
                                                                     >
                                                                         {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu & Đồng bộ'}
@@ -508,7 +508,7 @@ export const Settings: React.FC = () => {
                                                             </div>
                                                         </div>
                                                         <p className="text-xs text-green-600 mt-3 flex items-center gap-1 font-medium">
-                                                            <span className="w-2 h-2 bg-green-500 rounded-full"></span> Đang hoạt động
+                                                            <span className="w-2 h-2 bg-green-500 rounded-full"></span> Đang hoạt động ({apiKey.startsWith('sk-') ? 'OpenAI' : 'Google Gemini'})
                                                         </p>
                                                     </div>
                                                 )}

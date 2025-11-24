@@ -46,9 +46,12 @@ export interface SpeakingSuggestion {
   vietnameseTranslation: string;
 }
 
+type AIProvider = 'google' | 'openai';
+
 class GeminiService {
   private ai: GoogleGenAI | null = null;
   private apiKey: string = '';
+  private provider: AIProvider = 'google';
 
   constructor() {
     const storedKey = typeof window !== 'undefined' ? localStorage.getItem('dh_gemini_api_key') : null;
@@ -68,11 +71,21 @@ class GeminiService {
   public initializeModel(apiKey: string) {
     if (!apiKey) return;
     this.apiKey = apiKey;
-    this.ai = new GoogleGenAI({ apiKey: this.apiKey });
+
+    // Intelligent Provider Detection
+    if (apiKey.startsWith('sk-')) {
+      this.provider = 'openai';
+      this.ai = null; // OpenAI does not use the GoogleGenAI instance
+      console.log("🤖 AI Model Initialized (OpenAI Provider)");
+    } else {
+      this.provider = 'google';
+      this.ai = new GoogleGenAI({ apiKey: this.apiKey });
+      console.log("🤖 AI Model Initialized (Google Gemini Provider)");
+    }
+
     if (typeof window !== 'undefined') {
       localStorage.setItem('dh_gemini_api_key', apiKey);
     }
-    console.log("🤖 AI Model Initialized");
   }
 
   public updateApiKey(newKey: string) {
@@ -89,25 +102,59 @@ class GeminiService {
   }
 
   public hasKey(): boolean {
-    return !!this.ai;
+    return !!this.apiKey;
   }
 
   async validateKey(): Promise<boolean> {
-    if (!this.ai) return false;
+    if (!this.apiKey) return false;
     try {
-      await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: 'Hello',
-      });
-      return true;
+      if (this.provider === 'openai') {
+        await this.callOpenAI("Hello", false);
+        return true;
+      } else {
+        if (!this.ai) return false;
+        await this.ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: 'Hello',
+        });
+        return true;
+      }
     } catch (e) {
       console.error("API Key Validation Failed:", e);
       return false;
     }
   }
 
+  // --- OPENAI ADAPTER HELPER ---
+  private async callOpenAI(prompt: string, jsonMode: boolean = false, systemInstruction?: string): Promise<string> {
+    const messages = [];
+    if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+    messages.push({ role: "user", content: prompt });
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini", // Use cost-effective model as default
+        messages: messages,
+        response_format: jsonMode ? { type: "json_object" } : undefined
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error?.message || "OpenAI API Error");
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content || "";
+  }
+
   async analyzeFinances(transactions: Transaction[]): Promise<AIFinancialPlan> {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
 
     const recentTrans = transactions.slice(0, 100).map(t => ({
       date: t.date,
@@ -142,12 +189,17 @@ class GeminiService {
     `;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' }
-      });
-      const text = response.text || '{}';
+      let text = '';
+      if (this.provider === 'openai') {
+        text = await this.callOpenAI(prompt, true);
+      } else {
+        const response = await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: { responseMimeType: 'application/json' }
+        });
+        text = response.text || '{}';
+      }
       return JSON.parse(text.replace(/```json|```/g, '').trim());
     } catch (e) {
       console.error("AI Finance Analysis Error", e);
@@ -156,14 +208,19 @@ class GeminiService {
   }
 
   async analyzeMarket(prompt: string): Promise<MarketAnalysisResult> {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' }
-      });
-      const text = response.text || '{}';
+      let text = '';
+      if (this.provider === 'openai') {
+        text = await this.callOpenAI(prompt, true);
+      } else {
+        const response = await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: { responseMimeType: 'application/json' }
+        });
+        text = response.text || '{}';
+      }
       return JSON.parse(text.replace(/```json|```/g, '').trim());
     } catch (e) {
       console.error("AI Market Analysis Error", e);
@@ -172,16 +229,22 @@ class GeminiService {
   }
 
   async searchContent(prompt: string): Promise<string> {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        }
-      });
-      return response.text || "Không tìm thấy thông tin.";
+      if (this.provider === 'openai') {
+        // OpenAI does not support Google Search grounding directly. 
+        // We will just ask the model (knowledge cutoff might apply).
+        return await this.callOpenAI(prompt + "\n(Note: Provide best known info, indicate if data might be outdated)", false);
+      } else {
+        const response = await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+          }
+        });
+        return response.text || "Không tìm thấy thông tin.";
+      }
     } catch (e) {
       console.error("Search Error", e);
       return "Lỗi khi tìm kiếm thông tin: " + (e as any).message;
@@ -193,31 +256,84 @@ class GeminiService {
     message: string,
     systemInstruction: string
   ) {
-    if (!this.ai) throw new Error("AI not initialized");
+    if (!this.apiKey) throw new Error("AI not initialized");
 
-    const chat = this.ai.chats.create({
-      model: 'gemini-2.5-flash',
-      config: {
-        systemInstruction: systemInstruction,
-        tools: [{ googleSearch: {} }],
-        temperature: 0.7,
-      },
-      history: history as Content[]
-    });
+    if (this.provider === 'openai') {
+      // OpenAI Adapter for Streaming
+      const messages = history.map(h => ({
+        role: h.role === 'model' ? 'assistant' : 'user',
+        content: h.parts[0].text
+      }));
+      if (systemInstruction) messages.unshift({ role: "system", content: systemInstruction });
+      messages.push({ role: "user", content: message });
 
-    try {
-      const result = await chat.sendMessageStream({ message });
-      for await (const chunk of result) {
-        yield chunk as GenerateContentResponse;
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: messages,
+          stream: true
+        })
+      });
+
+      if (!response.body) throw new Error("No response body from OpenAI");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.trim().startsWith('data: ')) {
+            const jsonStr = line.trim().slice(6);
+            if (jsonStr === '[DONE]') continue;
+            try {
+              const json = JSON.parse(jsonStr);
+              const content = json.choices[0]?.delta?.content || '';
+              if (content) {
+                // Mimic Google GenAI response structure
+                yield { text: content } as any;
+              }
+            } catch (e) { }
+          }
+        }
       }
-    } catch (error) {
-      console.error("Chat Stream Error:", error);
-      throw error;
+
+    } else {
+      // Google Gemini Implementation
+      const chat = this.ai!.chats.create({
+        model: 'gemini-2.5-flash',
+        config: {
+          systemInstruction: systemInstruction,
+          tools: [{ googleSearch: {} }],
+          temperature: 0.7,
+        },
+        history: history as Content[]
+      });
+
+      try {
+        const result = await chat.sendMessageStream({ message });
+        for await (const chunk of result) {
+          yield chunk as GenerateContentResponse;
+        }
+      } catch (error) {
+        console.error("Chat Stream Error:", error);
+        throw error;
+      }
     }
   }
 
   async generateDailyVocabulary(level: string, topic?: string) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const topicInstruction = topic ? `focusing on the topic: "${topic}"` : 'on general topics';
     const prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. 
     Return strictly JSON array of objects with:
@@ -228,7 +344,11 @@ class GeminiService {
     - definition: English definition
     - example: Example sentence`;
 
-    const response = await this.ai.models.generateContent({
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, true);
+    }
+
+    const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: { responseMimeType: 'application/json' }
@@ -237,9 +357,14 @@ class GeminiService {
   }
 
   async gradeWritingPractice(level: string, question: string, userEssay: string) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const prompt = `Grade essay Level ${level}. Question: ${question}. Essay: ${userEssay}. Return JSON {score, generalFeedback, corrections: [{original, correction, explanation}], sampleEssay, betterVocab}.`;
-    const response = await this.ai.models.generateContent({
+
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, true);
+    }
+
+    const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: { responseMimeType: 'application/json' }
@@ -248,9 +373,14 @@ class GeminiService {
   }
 
   async generateGrammarQuiz(level: string, topic?: string) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const prompt = `Generate 10 Grammar Questions Level ${level} ${topic ? `about ${topic}` : ''}. Return strictly JSON array.`;
-    const response = await this.ai.models.generateContent({
+
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, true);
+    }
+
+    const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: { responseMimeType: 'application/json' }
@@ -259,9 +389,14 @@ class GeminiService {
   }
 
   async gradeGrammarQuiz(level: string, questions: any[], userAnswers: any) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const prompt = `Grade Grammar Quiz Level ${level}. Questions: ${JSON.stringify(questions)}. User Answers: ${JSON.stringify(userAnswers)}. Return JSON {score, results: [{id, isCorrect, explanation}]}.`;
-    const response = await this.ai.models.generateContent({
+
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, true);
+    }
+
+    const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: { responseMimeType: 'application/json' }
@@ -270,9 +405,14 @@ class GeminiService {
   }
 
   async generateReadingPassage(level: string, topic: string) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const prompt = `Write reading passage Level ${level} about "${topic}". Return JSON {title, content, summary, keywords}.`;
-    const response = await this.ai.models.generateContent({
+
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, true);
+    }
+
+    const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: { responseMimeType: 'application/json' }
@@ -281,9 +421,14 @@ class GeminiService {
   }
 
   async lookupDictionary(word: string, context: string) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const prompt = `Define "${word}" in context: "${context}". Return JSON {word, ipa, type, meaning_vi, definition_en, example}.`;
-    const response = await this.ai.models.generateContent({
+
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, true);
+    }
+
+    const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: { responseMimeType: 'application/json' }
@@ -292,9 +437,14 @@ class GeminiService {
   }
 
   async generateWritingTopic(level: string, type: 'task1' | 'task2') {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
     const prompt = `Generate Writing Topic ${type} Level ${level}. Return text only.`;
-    const response = await this.ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+
+    if (this.provider === 'openai') {
+      return await this.callOpenAI(prompt, false);
+    }
+
+    const response = await this.ai!.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
     return response.text || '';
   }
 
@@ -305,12 +455,16 @@ class GeminiService {
     onTranscript: (text: string, isUser: boolean, isFinal: boolean) => void,
     sysInstr: string
   ) {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
+
+    if (this.provider === 'openai') {
+      throw new Error("OpenAI Key detected. Live API (Realtime Audio) is currently only available with Google Gemini API Keys.");
+    }
 
     // System Instruction must be correct Content type
     const systemInstructionContent = { parts: [{ text: sysInstr }] };
 
-    return this.ai.live.connect({
+    return this.ai!.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-09-2025',
       callbacks: {
         onopen: () => console.log('Live connected'),
@@ -356,7 +510,7 @@ class GeminiService {
 
   // --- Speaking Suggestions ---
   async generateSpeakingSuggestions(lastAIQuestion: string): Promise<SpeakingSuggestion> {
-    if (!this.ai || !lastAIQuestion) return { hints: [], sampleAnswer: "", vietnameseTranslation: "" };
+    if (!this.apiKey || !lastAIQuestion) return { hints: [], sampleAnswer: "", vietnameseTranslation: "" };
 
     const prompt = `
       You are an English Tutor. The AI interlocutor just said: "${lastAIQuestion}".
@@ -375,12 +529,17 @@ class GeminiService {
       `;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' }
-      });
-      const text = response.text || '{}';
+      let text = '';
+      if (this.provider === 'openai') {
+        text = await this.callOpenAI(prompt, true);
+      } else {
+        const response = await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: { responseMimeType: 'application/json' }
+        });
+        text = response.text || '{}';
+      }
       return JSON.parse(text.replace(/```json|```/g, '').trim());
     } catch (e) {
       console.error("Error generating speaking suggestions", e);
@@ -390,7 +549,7 @@ class GeminiService {
 
   // --- Monologue Hint Generation (Fixed) ---
   async generateMonologueScript(topic: string, level: string): Promise<{ script: string, translation: string }> {
-    if (!this.ai) throw new Error("No API Key");
+    if (!this.apiKey) throw new Error("No API Key");
 
     const prompt = `
       Role: Professional English Speaking Examiner & Tutor.
@@ -411,15 +570,19 @@ class GeminiService {
       `;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json'
-          // Removing strict schema object to avoid parsing errors with creative tasks
-        }
-      });
-      const text = response.text || '{}';
+      let text = '';
+      if (this.provider === 'openai') {
+        text = await this.callOpenAI(prompt, true);
+      } else {
+        const response = await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+        text = response.text || '{}';
+      }
       return JSON.parse(text.replace(/```json|```/g, '').trim());
     } catch (e) {
       console.error("Error generating monologue script", e);
