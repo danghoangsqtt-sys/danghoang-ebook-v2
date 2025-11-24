@@ -10,6 +10,7 @@ import { Finance } from './pages/Finance';
 import { Settings } from './pages/Settings';
 import { VocabLibrary } from './pages/VocabLibrary';
 import { Management } from './pages/Management';
+import { Analytics } from "@vercel/analytics/react";
 
 // --- Theme Context ---
 type Theme = 'light' | 'dark';
@@ -66,6 +67,7 @@ function App() {
           </Routes>
         </Layout>
       </Router>
+      <Analytics />
     </ThemeContext.Provider>
   );
 }

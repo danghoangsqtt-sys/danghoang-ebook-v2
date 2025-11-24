@@ -178,13 +178,20 @@ export const Management: React.FC = () => {
 
                 <Card className="p-5 relative overflow-hidden group bg-gradient-to-br from-gray-900 to-gray-800 text-white border-none">
                     <div className="absolute top-0 right-0 p-4 opacity-20 text-5xl">▲</div>
-                    <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Gói Hosting</span>
+                    <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Vercel Analytics</span>
                     <div className="mt-1">
-                        <span className="text-2xl font-bold">Vercel Hobby</span>
+                        <span className="text-2xl font-bold">Đã Kích Hoạt</span>
                     </div>
                     <div className="mt-4 flex justify-between items-center">
-                        <span className="text-[10px] bg-white/10 px-2 py-1 rounded">Miễn phí</span>
-                        <span className="text-[10px] text-green-400">● Đã triển khai</span>
+                        <a
+                            href="https://vercel.com/dashboard"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] bg-white/20 hover:bg-white/30 transition-colors px-2 py-1 rounded text-white font-bold flex items-center gap-1"
+                        >
+                            Xem Dashboard ↗
+                        </a>
+                        <span className="text-[10px] text-green-400">● Tracking</span>
                     </div>
                 </Card>
             </div>
