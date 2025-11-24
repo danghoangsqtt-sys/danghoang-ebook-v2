@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChatWidget } from './ChatWidget';
 import { Pomodoro } from './Pomodoro';
 import { firebaseService } from '../services/firebase';
+import { UserProfile } from '../types';
 
 // Icons (Using Text/Emoji for simplicity or SVG paths)
 const Icons = {
@@ -20,38 +21,73 @@ const Icons = {
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  useEffect(() => {
-    const checkAdmin = () => {
-      // Check local storage first for instant UI feedback
-      const profile = localStorage.getItem('dh_user_profile');
-      if (profile) {
-        const p = JSON.parse(profile);
-        if (p.email === firebaseService.ADMIN_EMAIL) {
-          setIsAdmin(true);
-          return;
-        }
-      }
+  // --- User & Auth State ---
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [accountStatus, setAccountStatus] = useState<'guest' | 'pending' | 'active' | 'admin'>('guest');
+  const [isProfileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-      // Fallback/Confirm with Firebase Auth
-      if (firebaseService.currentUser?.email === firebaseService.ADMIN_EMAIL) {
-        setIsAdmin(true);
-      } else {
-        setIsAdmin(false);
+  useEffect(() => {
+    // Close dropdown when clicking outside
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setProfileDropdownOpen(false);
       }
     };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-    // Listen for auth changes
-    const unsub = firebaseService.auth.onAuthStateChanged((user) => {
-      if (user?.email === firebaseService.ADMIN_EMAIL) setIsAdmin(true);
-      else setIsAdmin(false);
+  useEffect(() => {
+    // Auth Listener
+    const unsub = firebaseService.auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        // 1. Set Basic Profile
+        const profile: UserProfile = {
+          uid: user.uid,
+          name: user.displayName || 'User',
+          email: user.email || '',
+          avatar: user.photoURL || '👨‍💻'
+        };
+        setCurrentUser(profile);
+
+        // 2. Check Admin
+        const isSysAdmin = user.email === firebaseService.ADMIN_EMAIL;
+        setIsAdmin(isSysAdmin);
+
+        // 3. Check Authorization Status (Async)
+        if (isSysAdmin) {
+          setAccountStatus('admin');
+        } else {
+          const isAuth = await firebaseService.isUserAuthorized();
+          setAccountStatus(isAuth ? 'active' : 'pending');
+        }
+      } else {
+        setCurrentUser(null);
+        setIsAdmin(false);
+        setAccountStatus('guest');
+      }
     });
-
-    checkAdmin();
     return () => unsub();
   }, []);
+
+  const handleLogin = async () => {
+    const result = await firebaseService.loginWithGoogle();
+    if (result) {
+      // State updates handled by onAuthStateChanged
+      navigate('/settings'); // Optional redirect
+    }
+  };
+
+  const handleLogout = async () => {
+    await firebaseService.logout();
+    setProfileDropdownOpen(false);
+    navigate('/');
+  };
 
   const navItems = [
     { path: '/', label: 'Tổng Quan', icon: Icons.Dashboard },
@@ -62,6 +98,16 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     { path: '/finance', label: 'Tài Chính', icon: Icons.Finance },
     { path: '/settings', label: 'Cài Đặt', icon: Icons.Settings },
   ];
+
+  // Render Status Badge
+  const renderStatusBadge = () => {
+    switch (accountStatus) {
+      case 'admin': return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">ADMIN</span>;
+      case 'active': return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">ĐÃ KÍCH HOẠT</span>;
+      case 'pending': return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-700 border border-yellow-200">CHƯA KÍCH HOẠT</span>;
+      default: return null;
+    }
+  };
 
   return (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-950 overflow-hidden relative font-sans transition-colors duration-200">
@@ -135,16 +181,81 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-gray-50 dark:bg-gray-950 transition-colors duration-200 relative">
-        {/* Mobile Header */}
-        <header className="lg:hidden bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 h-16 flex items-center justify-between shadow-sm z-30 shrink-0">
+
+        {/* Unified Top Bar (Desktop & Mobile) */}
+        <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 h-16 flex items-center justify-between shadow-sm z-30 shrink-0">
           <div className="flex items-center gap-3">
-            <button onClick={() => setMobileMenuOpen(true)} className="text-gray-600 dark:text-gray-300 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 active:scale-95 transition-all">
+            {/* Mobile Menu Trigger */}
+            <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden text-gray-600 dark:text-gray-300 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 active:scale-95 transition-all">
               <Icons.Menu />
             </button>
-            <span className="font-bold text-gray-800 dark:text-white text-lg truncate">DangHoang Ebook</span>
+            {/* Page Title (Mobile) / Breadcrumb Placeholder */}
+            <span className="lg:hidden font-bold text-gray-800 dark:text-white text-lg truncate">DangHoang Ebook</span>
           </div>
-          <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded-full flex items-center justify-center text-xs font-bold border border-blue-200 dark:border-blue-700">
-            DH
+
+          {/* Right Side: User Profile & Auth */}
+          <div className="flex items-center gap-4">
+            {currentUser ? (
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setProfileDropdownOpen(!isProfileDropdownOpen)}
+                  className="flex items-center gap-3 p-1.5 pr-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+                >
+                  <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-blue-100 dark:border-blue-900">
+                    {currentUser.avatar.startsWith('http') ? (
+                      <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-blue-600 flex items-center justify-center text-white">{currentUser.avatar}</div>
+                    )}
+                  </div>
+                  <div className="hidden md:flex flex-col items-start">
+                    <span className="text-xs font-bold text-gray-800 dark:text-white leading-none mb-1">{currentUser.name}</span>
+                    {renderStatusBadge()}
+                  </div>
+                </button>
+
+                {/* Dropdown Menu */}
+                {isProfileDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 py-2 animate-fade-in-up origin-top-right">
+                    <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-700 md:hidden">
+                      <p className="font-bold text-gray-800 dark:text-white">{currentUser.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{currentUser.email}</p>
+                      <div className="mt-1">{renderStatusBadge()}</div>
+                    </div>
+
+                    <Link
+                      to="/settings"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="block px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                    >
+                      <span>⚙️</span> Cài đặt tài khoản
+                    </Link>
+                    {accountStatus === 'pending' && (
+                      <Link
+                        to="/settings"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="block px-4 py-2.5 text-sm text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 flex items-center gap-2"
+                      >
+                        <span>🔑</span> Kích hoạt Key
+                      </Link>
+                    )}
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+                    >
+                      <span>🚪</span> Đăng xuất
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={handleLogin}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full font-bold text-sm shadow-md transition-all transform active:scale-95"
+              >
+                <span>G</span> <span className="hidden sm:inline">Đăng nhập</span>
+              </button>
+            )}
           </div>
         </header>
 

@@ -49,7 +49,6 @@ export const Settings: React.FC = () => {
 
     // User State
     const [profile, setProfile] = useState<UserProfile>({ name: 'Khách', avatar: '👨‍💻', email: '' });
-    const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
     const [isAuthorized, setIsAuthorized] = useState(false);
 
@@ -87,7 +86,6 @@ export const Settings: React.FC = () => {
                     const savedKey = localStorage.getItem('dh_gemini_api_key');
                     if (savedKey) {
                         setApiKey(savedKey);
-                        // Don't auto validate on every load to save quota, just check format or trust local
                         setKeyStatus('valid');
                     } else if (p.uid) {
                         fetchAssignedKey(p.uid);
@@ -104,6 +102,14 @@ export const Settings: React.FC = () => {
                 }
             }
         };
+
+        // Also listen for auth changes to update local state immediately when login happens in Layout
+        const unsub = firebaseService.auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                loadProfile();
+            }
+        });
+
         loadProfile();
         calculateStorage();
         loadVoiceSettings();
@@ -111,6 +117,7 @@ export const Settings: React.FC = () => {
         // Cleanup on unmount
         return () => {
             speechService.cancel();
+            unsub();
         };
     }, []);
 
@@ -174,7 +181,6 @@ export const Settings: React.FC = () => {
                     await firebaseService.updateUserApiKey(profile.uid, apiKey);
                     showToast("Đã đồng bộ Key lên Cloud!");
                 } catch (e) {
-                    // Fail silently or show small warn
                     console.warn("Failed to sync key to cloud", e);
                 }
             }
@@ -200,51 +206,6 @@ export const Settings: React.FC = () => {
             total: 5 * 1024 * 1024,
             percent: Math.min(100, (total / (5 * 1024 * 1024)) * 100)
         });
-    };
-
-    const handleGoogleLogin = async () => {
-        setIsLoggingIn(true);
-        const result = await firebaseService.loginWithGoogle();
-        if (result) {
-            const newProfile: UserProfile = {
-                uid: result.user.uid,
-                name: result.user.displayName || 'Người dùng',
-                email: result.user.email || '',
-                avatar: result.user.photoURL || '👨‍💻',
-                accessToken: result.token
-            };
-            setProfile(newProfile);
-            localStorage.setItem('dh_user_profile', JSON.stringify(newProfile));
-
-            const checkAdmin = newProfile.email === firebaseService.ADMIN_EMAIL;
-            setIsAdmin(checkAdmin);
-
-            const authorized = await firebaseService.isUserAuthorized();
-            setIsAuthorized(authorized);
-
-            if (result.apiKey) {
-                geminiService.updateApiKey(result.apiKey);
-                setApiKey(result.apiKey);
-                setKeyStatus('valid');
-                localStorage.setItem('dh_gemini_api_key', result.apiKey);
-                showToast(`Đã đồng bộ AI Key!`);
-            }
-
-            showToast(`Xin chào, ${newProfile.name}!`);
-        }
-        setIsLoggingIn(false);
-    };
-
-    const handleLogout = async () => {
-        await firebaseService.logout();
-        const guestProfile: UserProfile = { name: 'Khách', avatar: '👨‍💻', email: '' };
-        setProfile(guestProfile);
-        setIsAdmin(false);
-        setIsAuthorized(false);
-        localStorage.setItem('dh_user_profile', JSON.stringify(guestProfile));
-
-        setKeyStatus(apiKey ? 'unknown' : 'invalid');
-        showToast('Đã đăng xuất.');
     };
 
     const handleExportData = () => {
@@ -574,19 +535,15 @@ export const Settings: React.FC = () => {
 
                             {activeTab === 'account' && (
                                 <div className="space-y-8 animate-fade-in">
-                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-1">Tài khoản & Đồng bộ</h2>
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-1">Thông tin Tài khoản</h2>
 
                                     {!profile.email ? (
                                         <div className="bg-white border border-gray-200 dark:border-gray-700 p-8 rounded-2xl text-center shadow-sm max-w-md mx-auto">
                                             <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">👤</div>
                                             <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">Bạn đang dùng chế độ Khách</h3>
                                             <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-                                                Dữ liệu chỉ được lưu trên thiết bị này. Đăng nhập để bảo vệ dữ liệu và yêu cầu quyền truy cập AI.
+                                                Dữ liệu chỉ được lưu trên thiết bị này. Hãy đăng nhập ở góc trên phải màn hình để bảo vệ dữ liệu.
                                             </p>
-                                            <button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full inline-flex items-center justify-center gap-3 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95">
-                                                {isLoggingIn ? <span className="animate-spin">↻</span> : 'G'}
-                                                {isLoggingIn ? 'Đang kết nối...' : 'Đăng nhập Google'}
-                                            </button>
                                         </div>
                                     ) : (
                                         <div className="bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-700 p-6 rounded-2xl">
@@ -612,18 +569,8 @@ export const Settings: React.FC = () => {
                                                                 <span>⚠️</span> Chưa kích hoạt
                                                             </span>
                                                         )}
-                                                        <button
-                                                            onClick={handleGoogleLogin}
-                                                            disabled={isLoggingIn}
-                                                            className="px-3 py-1 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 rounded text-xs font-bold flex items-center gap-1 transition-colors"
-                                                        >
-                                                            {isLoggingIn ? 'Connecting...' : '🔄 Làm mới kết nối Google'}
-                                                        </button>
                                                     </div>
                                                 </div>
-                                                <button onClick={handleLogout} className="px-5 py-2 bg-white dark:bg-gray-800 text-red-600 border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl font-bold shadow-sm transition-colors whitespace-nowrap">
-                                                    Đăng xuất
-                                                </button>
                                             </div>
 
                                             {!isAuthorized && !isAdmin && (
