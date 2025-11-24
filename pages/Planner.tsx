@@ -128,31 +128,33 @@ export const Planner: React.FC = () => {
 
     // --- Handlers ---
     const handleSyncGoogle = async () => {
-        if (!userHasToken) return alert("Vui lòng đăng nhập Google trong phần Cài đặt để sử dụng tính năng này.");
+        // Feature Disabled due to verification costs
+        // if (!userHasToken) return alert("Vui lòng đăng nhập Google trong phần Cài đặt để sử dụng tính năng này.");
 
-        setIsSyncing(true);
-        try {
-            // Fetch current month + next month events range
-            const start = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1).toISOString();
-            const googleEvents = await googleCalendarService.listEvents(start);
-
-            // Merge: Keep local events that are NOT from google, append new google events
-            const localOnly = events.filter(e => !e.googleEventId);
-
-            // Optional: Check duplicates by ID if we want to update existing synced events
-            const merged = [...localOnly, ...googleEvents];
-            setEvents(merged);
-            alert(`Đã đồng bộ thành công ${googleEvents.length} sự kiện từ Google Calendar!`);
-        } catch (e: any) {
-            console.error(e);
-            if (e.message === 'TOKEN_EXPIRED' || e.message === 'NO_TOKEN' || (e.message && e.message.includes('invalid authentication credentials'))) {
-                alert("Phiên làm việc với Google Calendar đã hết hạn.\n\nVui lòng vào Cài Đặt > Tài khoản > Nhấn 'Làm mới kết nối' để cấp lại quyền truy cập.");
-            } else {
-                alert("Lỗi đồng bộ: " + e.message);
-            }
-        } finally {
-            setIsSyncing(false);
-        }
+        // setIsSyncing(true);
+        // try {
+        //     // Fetch current month + next month events range
+        //     const start = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1).toISOString();
+        //     const googleEvents = await googleCalendarService.listEvents(start);
+        //     
+        //     // Merge: Keep local events that are NOT from google, append new google events
+        //     const localOnly = events.filter(e => !e.googleEventId);
+        //     
+        //     // Optional: Check duplicates by ID if we want to update existing synced events
+        //     const merged = [...localOnly, ...googleEvents];
+        //     setEvents(merged);
+        //     alert(`Đã đồng bộ thành công ${googleEvents.length} sự kiện từ Google Calendar!`);
+        // } catch (e: any) {
+        //     console.error(e);
+        //     if (e.message === 'TOKEN_EXPIRED' || e.message === 'NO_TOKEN' || (e.message && e.message.includes('invalid authentication credentials'))) {
+        //         alert("Phiên làm việc với Google Calendar đã hết hạn.\n\nVui lòng vào Cài Đặt > Tài khoản > Nhấn 'Làm mới kết nối' để cấp lại quyền truy cập.");
+        //     } else {
+        //         alert("Lỗi đồng bộ: " + e.message);
+        //     }
+        // } finally {
+        //     setIsSyncing(false);
+        // }
+        alert("Tính năng này đang được bảo trì để nâng cấp hệ thống. Vui lòng quay lại sau!");
     };
 
     const changeWeek = (offset: number) => {
@@ -222,7 +224,8 @@ export const Planner: React.FC = () => {
                 color: newItemColor
             };
 
-            // Google Sync
+            // Google Sync Disabled
+            /*
             if (syncToGoogle && userHasToken) {
                 try {
                     const googleId = await googleCalendarService.createEvent(newItem);
@@ -230,12 +233,13 @@ export const Planner: React.FC = () => {
                 } catch (e: any) {
                     console.error("Failed to sync to google", e);
                     if (e.message === 'TOKEN_EXPIRED' || e.message === 'NO_TOKEN') {
-                        alert("Đã lưu local, nhưng không thể đồng bộ lên Google Calendar do phiên hết hạn. Vui lòng làm mới kết nối trong Cài Đặt.");
+                         alert("Đã lưu local, nhưng không thể đồng bộ lên Google Calendar do phiên hết hạn. Vui lòng làm mới kết nối trong Cài Đặt.");
                     } else {
-                        alert("Lưu local thành công nhưng lỗi đồng bộ Google: " + e.message);
+                         alert("Lưu local thành công nhưng lỗi đồng bộ Google: " + e.message);
                     }
                 }
             }
+            */
 
             setEvents([...events, newItem]);
         } else {
@@ -434,8 +438,8 @@ export const Planner: React.FC = () => {
                     <div className="flex gap-3 bg-white/10 p-1 rounded-xl backdrop-blur-sm flex-wrap">
                         <button onClick={() => setViewMode('week')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'week' ? 'bg-white text-blue-600 shadow' : 'text-blue-100 hover:bg-white/10'}`}>Tuần này</button>
                         <button onClick={() => setViewMode('month')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'month' ? 'bg-white text-blue-600 shadow' : 'text-blue-100 hover:bg-white/10'}`}>Tháng</button>
-                        <button onClick={handleSyncGoogle} disabled={!userHasToken || isSyncing} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${userHasToken ? 'text-blue-100 hover:bg-white/10' : 'text-white/30 cursor-not-allowed'}`}>
-                            <span>{isSyncing ? '🔄' : '🌐'}</span> {isSyncing ? 'Đang Sync...' : 'Sync Google'}
+                        <button disabled className="px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 text-white/50 cursor-not-allowed bg-white/10">
+                            <span>🌐</span> Tính năng đang bảo trì
                         </button>
                         <button onClick={() => setSummaryOpen(true)} className="px-4 py-2 rounded-lg text-sm font-bold text-blue-100 hover:bg-white/10 flex items-center gap-2"><span>📊</span> Báo cáo</button>
                     </div>
@@ -590,20 +594,7 @@ export const Planner: React.FC = () => {
                                             </div>
                                         </div>
                                     </div>
-                                    {userHasToken && (
-                                        <div className="flex items-center gap-2 pt-2">
-                                            <input
-                                                type="checkbox"
-                                                id="syncGoogle"
-                                                checked={syncToGoogle}
-                                                onChange={(e) => setSyncToGoogle(e.target.checked)}
-                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                                            />
-                                            <label htmlFor="syncGoogle" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer select-none">
-                                                Thêm vào Google Calendar
-                                            </label>
-                                        </div>
-                                    )}
+                                    {/* Google Sync Checkbox Removed */}
                                 </>
                             )}
 

@@ -38,17 +38,17 @@ class FinancialService {
     }
 
     // --- Transactions ---
-    subscribeToTransactions(uid: string, callback: (data: Transaction[]) => void) {
-        return this.getCollection(uid, 'finance_transactions')
+    // Changed from subscribe (realtime) to fetch (one-time) to save costs
+    async fetchTransactions(uid: string): Promise<Transaction[]> {
+        const snapshot = await this.getCollection(uid, 'finance_transactions')
             .orderBy('date', 'desc')
             .limit(100)
-            .onSnapshot((snapshot) => {
-                const data = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as Transaction[];
-                callback(data);
-            });
+            .get();
+
+        return snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as Transaction[];
     }
 
     async getTransactionsPaged(uid: string, limit: number, lastDoc: any = null) {
@@ -86,15 +86,13 @@ class FinancialService {
     }
 
     // --- Budgets ---
-    subscribeToBudgets(uid: string, callback: (data: BudgetCategory[]) => void) {
-        return this.getCollection(uid, 'finance_budgets')
-            .onSnapshot((snapshot) => {
-                const data = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as BudgetCategory[];
-                callback(data);
-            });
+    // Changed from subscribe (realtime) to fetch (one-time)
+    async fetchBudgets(uid: string): Promise<BudgetCategory[]> {
+        const snapshot = await this.getCollection(uid, 'finance_budgets').get();
+        return snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as BudgetCategory[];
     }
 
     async saveBudget(uid: string, budget: BudgetCategory) {
@@ -119,15 +117,13 @@ class FinancialService {
     }
 
     // --- Goals ---
-    subscribeToGoals(uid: string, callback: (data: FinancialGoal[]) => void) {
-        return this.getCollection(uid, 'finance_goals')
-            .onSnapshot((snapshot) => {
-                const data = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as FinancialGoal[];
-                callback(data);
-            });
+    // Changed from subscribe (realtime) to fetch (one-time)
+    async fetchGoals(uid: string): Promise<FinancialGoal[]> {
+        const snapshot = await this.getCollection(uid, 'finance_goals').get();
+        return snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as FinancialGoal[];
     }
 
     async saveGoal(uid: string, goal: FinancialGoal) {
@@ -154,15 +150,13 @@ class FinancialService {
     }
 
     // --- Debts ---
-    subscribeToDebts(uid: string, callback: (data: DebtItem[]) => void) {
-        return this.getCollection(uid, 'finance_debts')
-            .onSnapshot((snapshot) => {
-                const data = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as DebtItem[];
-                callback(data);
-            });
+    // Changed from subscribe (realtime) to fetch (one-time)
+    async fetchDebts(uid: string): Promise<DebtItem[]> {
+        const snapshot = await this.getCollection(uid, 'finance_debts').get();
+        return snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as DebtItem[];
     }
 
     async saveDebt(uid: string, debt: DebtItem) {

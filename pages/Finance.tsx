@@ -73,31 +73,52 @@ export const Finance: React.FC = () => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [aiPlan, setAiPlan] = useState<AIFinancialPlan | null>(null);
 
-    // --- Real-time Subscriptions ---
+    // --- Data Fetching Logic ---
+    const fetchData = async (user: firebase.User) => {
+        setIsLoading(true);
+        try {
+            // Authenticated: Fetch Once (Reduce Reads)
+            const [transData, budgetsData, goalsData, debtsData] = await Promise.all([
+                financialService.fetchTransactions(user.uid),
+                financialService.fetchBudgets(user.uid),
+                financialService.fetchGoals(user.uid),
+                financialService.fetchDebts(user.uid)
+            ]);
+
+            setTransactions(transData);
+            setBudgets(budgetsData);
+            setGoals(goalsData);
+            setDebts(debtsData);
+
+            // Fetch metadata once
+            firebase.firestore().collection('users').doc(user.uid).get().then(doc => {
+                if (doc.exists) {
+                    setAiMetadata(doc.data()?.finance_metadata || {});
+                }
+            });
+        } catch (error) {
+            console.error("Failed to fetch finance data", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleRefresh = () => {
+        if (currentUser) {
+            fetchData(currentUser);
+            setRefreshTrigger(prev => prev + 1);
+        }
+    };
+
+    // --- Authentication & Initial Load ---
     useEffect(() => {
         const unsubscribeAuth = firebase.auth().onAuthStateChanged(async (user) => {
             setCurrentUser(user);
             setIsLoading(true);
 
             if (user) {
-                // Authenticated: Use Firestore Realtime Listeners
-                const unsubTrans = financialService.subscribeToTransactions(user.uid, (data) => setTransactions(data));
-                const unsubBudgets = financialService.subscribeToBudgets(user.uid, (data) => setBudgets(data));
-                const unsubGoals = financialService.subscribeToGoals(user.uid, (data) => setGoals(data));
-                const unsubDebts = financialService.subscribeToDebts(user.uid, (data) => setDebts(data));
-
-                // Fetch metadata once
-                firebase.firestore().collection('users').doc(user.uid).get().then(doc => {
-                    if (doc.exists) {
-                        setAiMetadata(doc.data()?.finance_metadata || {});
-                    }
-                });
-
-                setIsLoading(false);
-
-                return () => {
-                    unsubTrans(); unsubBudgets(); unsubGoals(); unsubDebts();
-                };
+                // Initial Fetch
+                fetchData(user);
             } else {
                 // Guest Mode: Load from LocalStorage
                 const t = localStorage.getItem('dh_fin_trans');
@@ -153,7 +174,8 @@ export const Finance: React.FC = () => {
                 category: newTrans.category!,
                 description: newTrans.description || ''
             });
-            setRefreshTrigger(prev => prev + 1); // Force list refresh
+            // Trigger refresh manually to update UI without waiting for full reload
+            handleRefresh();
         } else {
             const item: Transaction = {
                 id: Date.now().toString(),
@@ -174,7 +196,8 @@ export const Finance: React.FC = () => {
         if (!window.confirm("Xóa giao dịch này?")) return;
         if (currentUser) {
             await financialService.deleteTransaction(currentUser.uid, id);
-            setRefreshTrigger(prev => prev + 1);
+            setRefreshTrigger(prev => prev + 1); // Update list component
+            handleRefresh(); // Update charts
         }
         else setTransactions(prev => prev.filter(t => t.id !== id));
     };
@@ -210,6 +233,7 @@ export const Finance: React.FC = () => {
             setAiMetadata({ analysisComment: aiPlan.analysisComment, cashflowInsight: aiPlan.cashflowInsight });
             setAiPlan(null);
             alert("Đã áp dụng kế hoạch tài chính mới!");
+            handleRefresh(); // Refresh to show new budgets/goals
         } catch (e) {
             alert("Lỗi khi lưu kế hoạch: " + (e as any).message);
         }
@@ -243,36 +267,26 @@ export const Finance: React.FC = () => {
 
     // --- Rollover Calculation Logic ---
     const calculateRollover = (categoryName: string) => {
-        if (statsMode !== 'month') return 0; // Only applicable for monthly budgeting logic
-
-        // 1. Determine the Start Date (First ever transaction for this category)
-        // Note: In a more complex app, budgets would have a 'startDate'. Here we infer it or assume generic accumulation.
-        // To be safe and simple: We look at all historical transactions BEFORE the currently selected month.
+        if (statsMode !== 'month') return 0;
 
         const startOfCurrentMonth = new Date(filterDate.getFullYear(), filterDate.getMonth(), 1);
 
-        // Filter expense transactions for this category BEFORE this month
         const historyTrans = transactions.filter(t =>
             t.category.toLowerCase().trim() === categoryName.toLowerCase().trim() &&
             t.type === 'expense' &&
             new Date(t.date) < startOfCurrentMonth
         );
 
-        if (historyTrans.length === 0) return 0; // No history, no rollover
+        if (historyTrans.length === 0) return 0;
 
-        // 2. Find the earliest date to start calculating the budget allowance
         const timestamps = historyTrans.map(t => new Date(t.date).getTime());
         const firstTransDate = new Date(Math.min(...timestamps));
         const startMonth = new Date(firstTransDate.getFullYear(), firstTransDate.getMonth(), 1);
 
-        // 3. Calculate months passed: [Start Month ... Current Month - 1]
-        // Formula: (YearDiff * 12) + MonthDiff
         const monthsPassed = (startOfCurrentMonth.getFullYear() - startMonth.getFullYear()) * 12 + (startOfCurrentMonth.getMonth() - startMonth.getMonth());
 
-        // 4. Ensure monthsPassed is at least 1 if there is history
         if (monthsPassed <= 0) return 0;
 
-        // 5. Find the budget limit (Assuming fixed budget for simplicity in this version)
         const budget = budgets.find(b => b.name.toLowerCase().trim() === categoryName.toLowerCase().trim());
         if (!budget) return 0;
 
@@ -285,13 +299,9 @@ export const Finance: React.FC = () => {
     // --- Helpers for Transaction Modal ---
     const getAvailableCategories = () => {
         if (newTrans.type === 'income') return COMMON_CATEGORIES_INCOME;
-
-        // Combine User Budgets with Common Categories for Expenses
         const budgetNames = budgets
             .filter(b => b.type === 'expense')
             .map(b => b.name);
-
-        // Use Set to deduplicate
         return Array.from(new Set([...budgetNames, ...COMMON_CATEGORIES_EXPENSE]));
     };
 
@@ -301,15 +311,7 @@ export const Finance: React.FC = () => {
         const budget = budgets.find(b => b.name.toLowerCase().trim() === newTrans.category?.toLowerCase().trim());
         if (!budget) return null;
 
-        // Use transaction date for calculation
         const transDate = newTrans.date ? new Date(newTrans.date) : new Date();
-
-        // Need to consider rollover if the transaction date is in the current view (or recalculate logic for that specific month)
-        // For simplicity in preview, we stick to basic monthly limit check unless we build a complex forecaster.
-        // However, showing the *current month's* effective limit is better.
-
-        // Note: calculateRollover relies on 'filterDate'. Ideally we calculate for 'transDate'.
-        // We will skip complex rollover preview here to avoid confusion, just show basic monthly limit.
 
         const currentSpent = transactions
             .filter(t => {
@@ -388,7 +390,6 @@ export const Finance: React.FC = () => {
 
     // --- SUB COMPONENTS ---
     const OverviewTab = () => {
-        // Calculate Total Budget for the selected month view
         const totalBudgetLimit = budgets.filter(b => b.type === 'expense').reduce((sum, b) => sum + b.limit, 0);
         const budgetedSpent = budgets.filter(b => b.type === 'expense').reduce((sum, b) => {
             return sum + calculateBudgetSpent(b.name);
@@ -606,7 +607,10 @@ export const Finance: React.FC = () => {
                 type: budgetType
             };
 
-            if (currentUser) await financialService.saveBudget(currentUser.uid, newBudget);
+            if (currentUser) {
+                await financialService.saveBudget(currentUser.uid, newBudget);
+                handleRefresh(); // Manual refresh logic
+            }
             else {
                 if (editingBudget) setBudgets(prev => prev.map(b => b.id === editingBudget.id ? newBudget : b));
                 else setBudgets(prev => [...prev, newBudget]);
@@ -616,7 +620,10 @@ export const Finance: React.FC = () => {
 
         const deleteBudget = async (id: string) => {
             if (!window.confirm("Xóa ngân sách này?")) return;
-            if (currentUser) await financialService.deleteBudget(currentUser.uid, id);
+            if (currentUser) {
+                await financialService.deleteBudget(currentUser.uid, id);
+                handleRefresh();
+            }
             else setBudgets(prev => prev.filter(b => b.id !== id));
         };
 
@@ -671,8 +678,6 @@ export const Finance: React.FC = () => {
                     {budgetMetrics.map(b => {
                         const { spent, limit, rollover, effectiveLimit } = b;
 
-                        // Calculate Percent based on Effective Limit
-                        // If effectiveLimit is negative or zero (due to huge deficit), treating as 100% spent/over
                         const percent = effectiveLimit > 0 ? Math.min((spent / effectiveLimit) * 100, 100) : 100;
                         const isOver = spent > effectiveLimit;
                         const isDeficit = effectiveLimit <= 0;
@@ -769,7 +774,6 @@ export const Finance: React.FC = () => {
         );
     };
 
-    // ... GoalsTabFull and DebtTabFull remain unchanged ...
     const GoalsTabFull = () => {
         const [isGoalModalOpen, setGoalModalOpen] = useState(false);
         const [editingGoal, setEditingGoal] = useState<FinancialGoal | null>(null);
@@ -797,7 +801,10 @@ export const Finance: React.FC = () => {
                 color
             };
 
-            if (currentUser) await financialService.saveGoal(currentUser.uid, newGoal);
+            if (currentUser) {
+                await financialService.saveGoal(currentUser.uid, newGoal);
+                handleRefresh();
+            }
             else {
                 if (editingGoal) setGoals(prev => prev.map(g => g.id === editingGoal.id ? newGoal : g));
                 else setGoals(prev => [...prev, newGoal]);
@@ -810,7 +817,10 @@ export const Finance: React.FC = () => {
             const goal = goals.find(g => g.id === depositModal.goalId);
             if (goal) {
                 const updatedGoal = { ...goal, currentAmount: goal.currentAmount + Number(depositAmount) };
-                if (currentUser) await financialService.saveGoal(currentUser.uid, updatedGoal);
+                if (currentUser) {
+                    await financialService.saveGoal(currentUser.uid, updatedGoal);
+                    handleRefresh();
+                }
                 else setGoals(prev => prev.map(g => g.id === goal.id ? updatedGoal : g));
             }
             setDepositModal({ isOpen: false, goalId: null }); setDepositAmount(0);
@@ -818,7 +828,10 @@ export const Finance: React.FC = () => {
 
         const deleteGoal = async (id: string) => {
             if (!window.confirm("Xóa mục tiêu này?")) return;
-            if (currentUser) await financialService.deleteGoal(currentUser.uid, id);
+            if (currentUser) {
+                await financialService.deleteGoal(currentUser.uid, id);
+                handleRefresh();
+            }
             else setGoals(prev => prev.filter(g => g.id !== id));
         };
 
@@ -931,7 +944,10 @@ export const Finance: React.FC = () => {
                 isPaid: editingDebt ? editingDebt.isPaid : false
             };
 
-            if (currentUser) await financialService.saveDebt(currentUser.uid, newItem);
+            if (currentUser) {
+                await financialService.saveDebt(currentUser.uid, newItem);
+                handleRefresh();
+            }
             else {
                 if (editingDebt) setDebts(prev => prev.map(d => d.id === editingDebt.id ? newItem : d));
                 else setDebts(prev => [newItem, ...prev]);
@@ -941,13 +957,19 @@ export const Finance: React.FC = () => {
 
         const deleteDebt = async (id: string) => {
             if (!window.confirm("Xóa khoản này?")) return;
-            if (currentUser) await financialService.deleteDebt(currentUser.uid, id);
+            if (currentUser) {
+                await financialService.deleteDebt(currentUser.uid, id);
+                handleRefresh();
+            }
             else setDebts(prev => prev.filter(d => d.id !== id));
         };
 
         const togglePaid = async (d: DebtItem) => {
             const updated = { ...d, isPaid: !d.isPaid };
-            if (currentUser) await financialService.saveDebt(currentUser.uid, updated);
+            if (currentUser) {
+                await financialService.saveDebt(currentUser.uid, updated);
+                handleRefresh();
+            }
             else setDebts(prev => prev.map(item => item.id === d.id ? updated : item));
         };
 
@@ -1023,7 +1045,21 @@ export const Finance: React.FC = () => {
     return (
         <div className="pb-24 md:pb-20">
             <div className="flex flex-col md:flex-row justify-between items-end md:items-center mb-6 gap-4">
-                <div><h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Tài Chính</h1><p className="text-gray-500 mt-1 text-sm">Quản lý dòng tiền {currentUser ? '(Đã đồng bộ Cloud)' : '(Chế độ Khách)'}</p></div>
+                <div>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        Tài Chính
+                        {currentUser && (
+                            <button
+                                onClick={handleRefresh}
+                                className="ml-2 p-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-full text-blue-600 dark:text-blue-400 transition-colors shadow-sm text-sm"
+                                title="Làm mới dữ liệu"
+                            >
+                                ↻
+                            </button>
+                        )}
+                    </h1>
+                    <p className="text-gray-500 mt-1 text-sm">Quản lý dòng tiền {currentUser ? '(Cloud Save)' : '(Chế độ Khách)'}</p>
+                </div>
             </div>
             <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-full overflow-x-auto no-scrollbar">
                 {[{ id: 'overview', label: 'Tổng Quan' }, { id: 'budget', label: 'Ngân Sách' }, { id: 'goals', label: 'Mục Tiêu' }, { id: 'debt', label: 'Sổ Nợ' }, { id: 'invest', label: 'Thông tin Thị trường & Vàng' }].map(t => (

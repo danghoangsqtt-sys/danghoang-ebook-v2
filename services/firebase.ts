@@ -75,7 +75,9 @@ class FirebaseService {
 
     async loginWithGoogle(): Promise<{ user: firebase.User, token?: string, apiKey?: string } | null> {
         const provider = new firebase.auth.GoogleAuthProvider();
-        provider.addScope('https://www.googleapis.com/auth/calendar');
+        // Modified: Removed Calendar scope to avoid verification issues
+        provider.addScope('email');
+        provider.addScope('profile');
 
         try {
             const result = await this.auth.signInWithPopup(provider);
@@ -93,6 +95,7 @@ class FirebaseService {
                 if (docSnap.exists) {
                     const data = docSnap.data();
                     storedApiKey = data?.geminiApiKey || '';
+
                     // Check if locked
                     if (data?.isLocked) {
                         await this.auth.signOut();
@@ -158,14 +161,16 @@ class FirebaseService {
     }
 
     async updateUserApiKey(targetUid: string, apiKey: string) {
-        if (await this.isUserAuthorized()) {
+        // Allow if Admin OR if targetUid is current user
+        if (this.currentUser?.uid === targetUid || await this.isUserAuthorized()) {
             try {
                 await this.db.collection("users").doc(targetUid).set({
                     geminiApiKey: apiKey,
-                    isActiveAI: !!apiKey
+                    isActiveAI: !!apiKey // Auto active if they provide a key (or keep it active)
                 }, { merge: true });
             } catch (e) {
                 console.error("Error updating user API key", e);
+                throw e;
             }
         }
     }
@@ -251,6 +256,7 @@ class FirebaseService {
                 const data = docSnap.data();
                 if (data) {
                     if (data.isLocked) return false;
+                    // isAuth is true if storageEnabled OR isActiveAI is explicitly true
                     const isAuth = data.storageEnabled === true || data.isActiveAI === true;
                     this._authCache = { uid: user.uid, value: isAuth };
                     return isAuth;

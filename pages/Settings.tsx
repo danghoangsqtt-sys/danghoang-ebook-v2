@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
 import { firebaseService } from '../services/firebase';
@@ -22,7 +23,7 @@ interface ErrorBoundaryProps {
     children?: React.ReactNode;
 }
 
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     constructor(props: ErrorBoundaryProps) {
         super(props);
         this.state = { hasError: false };
@@ -164,15 +165,17 @@ export const Settings: React.FC = () => {
         setIsCheckingKey(false);
 
         if (isValid) {
-            showToast("Kích hoạt AI thành công! 🚀");
+            showToast("✅ Tuyệt vời! Bạn đã kích hoạt thành công Nana AI.");
             localStorage.setItem('dh_gemini_api_key', apiKey);
 
-            if (isAdmin && profile.uid) {
+            // Automatically sync key to Cloud if User is Logged In
+            if (profile.uid) {
                 try {
                     await firebaseService.updateUserApiKey(profile.uid, apiKey);
-                    showToast("Đã cập nhật System API Key!");
+                    showToast("Đã đồng bộ Key lên Cloud!");
                 } catch (e) {
-                    showToast("Lỗi khi lưu Cloud.");
+                    // Fail silently or show small warn
+                    console.warn("Failed to sync key to cloud", e);
                 }
             }
         } else {
@@ -248,15 +251,7 @@ export const Settings: React.FC = () => {
         const backup: Record<string, any> = {};
         DATA_KEYS.forEach(key => {
             const val = localStorage.getItem(key);
-            if (val) {
-                try {
-                    // Attempt to parse JSON. Some items like API keys or themes might be plain strings.
-                    backup[key] = JSON.parse(val);
-                } catch (e) {
-                    // If parse fails (e.g. simple string like 'AIza...'), store as is
-                    backup[key] = val;
-                }
-            }
+            if (val) backup[key] = JSON.parse(val);
         });
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup));
         const downloadAnchorNode = document.createElement('a');
@@ -278,13 +273,7 @@ export const Settings: React.FC = () => {
                 let count = 0;
                 Object.keys(json).forEach(key => {
                     if (DATA_KEYS.includes(key)) {
-                        const val = json[key];
-                        // If value is object/array, stringify it. If primitive string, store as is.
-                        if (typeof val === 'object') {
-                            localStorage.setItem(key, JSON.stringify(val));
-                        } else {
-                            localStorage.setItem(key, val.toString());
-                        }
+                        localStorage.setItem(key, JSON.stringify(json[key]));
                         count++;
                     }
                 });
@@ -372,11 +361,12 @@ export const Settings: React.FC = () => {
 
                                     <section>
                                         <div className="flex items-center gap-2 mb-4">
-                                            <h2 className="text-lg font-bold text-gray-800 dark:text-white">Trợ lý AI & Tính năng nâng cao</h2>
+                                            <h2 className="text-lg font-bold text-gray-800 dark:text-white">Cài đặt Trợ lý Ảo (Nana AI)</h2>
                                             {keyStatus === 'valid' && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold border border-green-200">Đang hoạt động</span>}
                                         </div>
 
                                         {isAdmin ? (
+                                            // --- ADMIN VIEW ---
                                             <div className="bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-xl p-6">
                                                 <div className="mb-0">
                                                     <label className="text-sm font-bold text-gray-700 dark:text-gray-200 block mb-2">System-wide Gemini API Key (Admin)</label>
@@ -404,30 +394,76 @@ export const Settings: React.FC = () => {
                                                     <p className="text-xs text-gray-500 mt-2">* Key này sẽ được dùng cho toàn bộ hệ thống.</p>
                                                 </div>
                                             </div>
+                                        ) : !isAuthorized ? (
+                                            // --- UNAUTHORIZED USER VIEW (LOCKED) ---
+                                            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6 flex flex-col items-center text-center animate-fade-in">
+                                                <div className="text-5xl mb-4">🔒</div>
+                                                <h3 className="text-xl font-bold text-yellow-800 mb-2">Tính năng AI đang khóa</h3>
+                                                <p className="text-sm text-yellow-700 mb-6 max-w-md">
+                                                    Vui lòng liên hệ Admin để mở khóa tính năng Trợ lý ảo Nana (Luyện nói, Chấm bài) và Lưu trữ đám mây.
+                                                </p>
+                                                <a
+                                                    href="https://zalo.me/0343019101"
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-bold shadow-lg transform transition-all hover:scale-105 flex items-center gap-2"
+                                                >
+                                                    <span>💬</span> Liên hệ Zalo: 0343019101
+                                                </a>
+                                            </div>
                                         ) : (
-                                            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
-                                                <div className="relative z-10 flex flex-col md:flex-row items-center gap-6">
-                                                    <div className="flex-1 text-center md:text-left">
-                                                        <h3 className="text-xl font-bold mb-2">
-                                                            {isAuthorized ? 'Tài khoản của bạn đã được kích hoạt 🚀' : 'Kích hoạt tính năng AI & Cloud Storage'}
-                                                        </h3>
-                                                        <p className="text-blue-100 text-sm mb-4 leading-relaxed">
-                                                            {isAuthorized
-                                                                ? 'Bạn có quyền truy cập đầy đủ vào Trợ lý ảo Nana và Đồng bộ đám mây.'
-                                                                : 'Để sử dụng Trợ lý ảo Nana, Chấm điểm Writing AI và đồng bộ dữ liệu đám mây, vui lòng liên hệ Admin.'
-                                                            }
-                                                        </p>
-                                                        {!isAuthorized && (
-                                                            <div className="inline-flex items-center gap-3 bg-white/20 backdrop-blur-md border border-white/30 px-4 py-2 rounded-lg hover:bg-white/30 transition-colors cursor-pointer">
-                                                                <span className="text-2xl">💬</span>
-                                                                <div className="text-left">
-                                                                    <p className="text-[10px] uppercase font-bold text-blue-200">Liên hệ Zalo Admin</p>
-                                                                    <p className="font-bold text-lg">0343019101</p>
-                                                                </div>
-                                                            </div>
-                                                        )}
+                                            // --- AUTHORIZED USER VIEW (GUIDE + INPUT) ---
+                                            <div className="space-y-6 animate-fade-in">
+                                                {/* Step-by-Step Guide */}
+                                                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl p-6">
+                                                    <h3 className="font-bold text-blue-800 dark:text-blue-300 text-lg mb-4 flex items-center gap-2">
+                                                        <span>🔑</span> Hướng dẫn lấy Key trong 30 giây
+                                                    </h3>
+                                                    <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+                                                        <div className="flex gap-3 items-start">
+                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
+                                                            <p>
+                                                                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-600 font-bold hover:underline">Bấm vào đây</a> để mở trang Google AI Studio.
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex gap-3 items-start">
+                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
+                                                            <p>Đăng nhập bằng Gmail của bạn ➝ Bấm nút xanh <b>[Create API key]</b>.</p>
+                                                        </div>
+                                                        <div className="flex gap-3 items-start">
+                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
+                                                            <p>Chọn <b>[Create API key in new project]</b> ➝ Chờ một chút rồi bấm <b>[Copy]</b>.</p>
+                                                        </div>
+                                                        <div className="flex gap-3 items-start">
+                                                            <span className="bg-blue-200 text-blue-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
+                                                            <p>Quay lại đây và dán vào ô bên dưới ⬇️</p>
+                                                        </div>
                                                     </div>
-                                                    <div className="hidden md:block text-8xl opacity-20">{isAuthorized ? '✅' : '🔒'}</div>
+                                                </div>
+
+                                                {/* Input Area */}
+                                                <div>
+                                                    <div className="relative flex items-center gap-2">
+                                                        <div className="relative flex-1">
+                                                            <input
+                                                                type="text"
+                                                                value={apiKey}
+                                                                onChange={(e) => setApiKey(e.target.value)}
+                                                                className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-4 py-3 text-sm focus:ring-2 focus:ring-green-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors font-mono"
+                                                                placeholder="Dán mã key bắt đầu bằng AIza... vào đây"
+                                                            />
+                                                        </div>
+                                                        <button
+                                                            onClick={checkAndSaveKey}
+                                                            disabled={isCheckingKey || apiKey.length < 20}
+                                                            className={`px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center gap-2 ${keyStatus === 'valid' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                                                        >
+                                                            {isCheckingKey ? <span className="animate-spin">↻</span> : 'Lưu & Đồng bộ'}
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-xs text-gray-400 mt-2 ml-1">
+                                                        * Key của bạn được lưu an toàn trên thiết bị và đồng bộ với tài khoản Google của riêng bạn.
+                                                    </p>
                                                 </div>
                                             </div>
                                         )}
