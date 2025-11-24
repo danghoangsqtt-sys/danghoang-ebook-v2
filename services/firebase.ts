@@ -479,7 +479,8 @@ class FirebaseService {
             }
             return null;
         } catch (e) {
-            console.error("Error fetching system config", e);
+            // Suppress error logs for public config reads which might fail due to permissions
+            // console.error("Error fetching system config", e);
             return null;
         }
     }

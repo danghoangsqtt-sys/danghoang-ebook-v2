@@ -133,14 +133,16 @@ class GeminiService {
     // Admin Bypass
     if (user && user.email === firebaseService.ADMIN_EMAIL) return;
 
-    // Helper to get Zalo Contact
+    // Helper to get Zalo Contact - using try/catch to silently fail if permission denied
     let zaloNumber = "0343019101";
     try {
       const config = await firebaseService.getSystemConfig();
       if (config && config.zaloNumber) {
         zaloNumber = config.zaloNumber;
       }
-    } catch (e) { }
+    } catch (e) {
+      // Ignore permission errors for unauthenticated users to prevent noise
+    }
 
     const contactMsg = `Vui lòng liên hệ Admin qua zalo: ${zaloNumber} để mở khóa tính năng AI và nhiều tiện ích đa dạng khác của website.`;
 
