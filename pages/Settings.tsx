@@ -5,6 +5,7 @@ import { UserProfile } from '../types';
 import { firebaseService } from '../services/firebase';
 import { geminiService } from '../services/gemini';
 import { speechService, VoiceSettings, DEFAULT_VOICE_SETTINGS } from '../services/speech';
+import firebase from 'firebase/compat/app'; // Ensure firebase types are available
 
 const DATA_KEYS = [
     'dh_course_tree_v2', 'dh_completed_lessons',
@@ -68,49 +69,72 @@ export const Settings: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        const loadProfile = async () => {
-            const savedProfile = localStorage.getItem('dh_user_profile');
-            if (savedProfile) {
-                try {
-                    const p = JSON.parse(savedProfile);
-                    setProfile(p);
+        const syncProfile = async (user: firebase.User | null) => {
+            if (user) {
+                // 1. Construct Profile from Live Auth Data
+                const p: UserProfile = {
+                    name: user.displayName || 'User',
+                    email: user.email || '',
+                    avatar: user.photoURL || '👨‍💻',
+                    uid: user.uid
+                };
+                setProfile(p);
 
-                    const adminCheck = p.email === firebaseService.ADMIN_EMAIL;
-                    setIsAdmin(adminCheck);
+                // 2. Update Admin Status
+                const adminCheck = user.email === firebaseService.ADMIN_EMAIL;
+                setIsAdmin(adminCheck);
 
-                    // Check Authorization
-                    const authorized = await firebaseService.isUserAuthorized();
-                    setIsAuthorized(authorized);
+                // 3. Update Authorization Status
+                const authorized = await firebaseService.isUserAuthorized();
+                setIsAuthorized(authorized);
 
-                    // Load API Key Logic
-                    const savedKey = localStorage.getItem('dh_gemini_api_key');
-                    if (savedKey) {
-                        setApiKey(savedKey);
-                        setKeyStatus('valid');
-                    } else if (p.uid) {
-                        fetchAssignedKey(p.uid);
-                    }
-                } catch (e) {
-                    console.error("Error loading profile", e);
-                }
-            } else {
-                // Guest Mode
+                // 4. Sync Key
                 const savedKey = localStorage.getItem('dh_gemini_api_key');
                 if (savedKey) {
                     setApiKey(savedKey);
                     setKeyStatus('valid');
+                } else {
+                    const assignedKey = await firebaseService.getMyAssignedApiKey(user.uid);
+                    if (assignedKey) {
+                        geminiService.updateApiKey(assignedKey);
+                        setApiKey(assignedKey);
+                        setKeyStatus('valid');
+                        localStorage.setItem('dh_gemini_api_key', assignedKey);
+                    }
                 }
+
+                // Update LocalStorage cache for consistency
+                localStorage.setItem('dh_user_profile', JSON.stringify(p));
+            } else {
+                // Fallback to Guest or LocalStorage if not logged in
+                const savedProfile = localStorage.getItem('dh_user_profile');
+                if (savedProfile) {
+                    try {
+                        const p = JSON.parse(savedProfile);
+                        // Only use saved profile if it looks like a guest profile or we want offline support
+                        // For now, if no auth user, we reset to Guest to avoid confusion
+                        setProfile({ name: 'Khách', avatar: '👨‍💻', email: '' });
+                    } catch (e) {
+                        setProfile({ name: 'Khách', avatar: '👨‍💻', email: '' });
+                    }
+                } else {
+                    setProfile({ name: 'Khách', avatar: '👨‍💻', email: '' });
+                }
+                setIsAdmin(false);
+                setIsAuthorized(false);
             }
         };
 
-        // Also listen for auth changes to update local state immediately when login happens in Layout
+        // Initial check
+        if (firebaseService.auth.currentUser) {
+            syncProfile(firebaseService.auth.currentUser);
+        }
+
+        // Listen for auth changes
         const unsub = firebaseService.auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                loadProfile();
-            }
+            syncProfile(user);
         });
 
-        loadProfile();
         calculateStorage();
         loadVoiceSettings();
 
@@ -147,16 +171,6 @@ export const Settings: React.FC = () => {
 
     const testVoice = () => {
         speechService.speak("Hế lô! Nana đây. Giọng tớ nghe ổn không nè? Mình là người Hà Nội đấy nhé!", voiceSettings);
-    };
-
-    const fetchAssignedKey = async (uid: string) => {
-        const assignedKey = await firebaseService.getMyAssignedApiKey(uid);
-        if (assignedKey) {
-            geminiService.updateApiKey(assignedKey);
-            setApiKey(assignedKey);
-            setKeyStatus('valid');
-            localStorage.setItem('dh_gemini_api_key', assignedKey);
-        }
     };
 
     const checkAndSaveKey = async () => {
