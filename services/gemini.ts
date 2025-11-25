@@ -164,8 +164,11 @@ class GeminiService {
 
   // --- OPENAI ADAPTER HELPER ---
   private async callOpenAI(prompt: string, jsonMode: boolean = false, systemInstruction?: string): Promise<string> {
+    // Ensure system instruction exists for JSON mode to improve reliability
+    const effectiveSystemInstruction = systemInstruction || (jsonMode ? "You are a helpful assistant. You must output strictly valid JSON." : undefined);
+
     const messages = [];
-    if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+    if (effectiveSystemInstruction) messages.push({ role: "system", content: effectiveSystemInstruction });
     messages.push({ role: "user", content: prompt });
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -207,7 +210,7 @@ class GeminiService {
       3. Identify anomalies or warnings (e.g., "Giao dịch lớn bất thường", "Tần suất rút tiền cao").
       4. Provide a sentiment summary in Vietnamese evaluating the CURRENT situation (Keep it concise for a dashboard summary).
 
-      Output strictly JSON:
+      Output strictly valid JSON object:
       {
         "healthScore": number,
         "healthRating": "Xuất sắc" | "Tốt" | "Khá" | "Cần cải thiện" | "Báo động",
@@ -255,7 +258,7 @@ class GeminiService {
     3. Suggest a specific debt repayment or savings strategy.
     4. Provide a cashflow optimization insight in Vietnamese.
 
-    Constraint: Return strictly valid JSON.
+    Constraint: Return strictly valid JSON object.
     {
         "recommendedBudgets": [
             { "name": "string", "limit": number, "type": "expense", "reason": "string" }
@@ -297,7 +300,8 @@ class GeminiService {
     try {
       let text = '';
       if (this.provider === 'openai') {
-        text = await this.callOpenAI(prompt, true);
+        // Ensure prompt explicitly asks for JSON for OpenAI
+        text = await this.callOpenAI(prompt + "\nIMPORTANT: Return strictly valid JSON object matching the schema.", true);
       } else {
         const response = await this.ai!.models.generateContent({
           model: 'gemini-2.5-flash',
@@ -421,7 +425,9 @@ class GeminiService {
   async generateDailyVocabulary(level: string, topic?: string) {
     await this.enforcePolicy();
     const topicInstruction = topic ? `focusing on the topic: "${topic}"` : 'on general topics';
-    const prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. 
+
+    // Default Prompt
+    let prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. 
     Return strictly JSON array of objects with:
     - term: the word
     - ipa: IPA phonetic transcription (e.g., /həˈləʊ/)
@@ -431,7 +437,19 @@ class GeminiService {
     - example: Example sentence`;
 
     if (this.provider === 'openai') {
-      return await this.callOpenAI(prompt, true);
+      // For OpenAI, wrap the array in an object to satisfy json_object mode
+      prompt = `Generate 5 advanced English vocabulary words for Level ${level} ${topicInstruction}. 
+        Return a strictly valid JSON object with a key "items" containing an array of objects.
+        Structure: { "items": [{ "term": "...", "ipa": "...", "partOfSpeech": "...", "meaning": "...", "definition": "...", "example": "..." }] }`;
+
+      const jsonStr = await this.callOpenAI(prompt, true);
+      try {
+        const parsed = JSON.parse(jsonStr);
+        // Unwrap for the UI
+        return JSON.stringify(parsed.items || []);
+      } catch (e) {
+        return '[]';
+      }
     }
 
     const response = await this.ai!.models.generateContent({
@@ -444,7 +462,7 @@ class GeminiService {
 
   async gradeWritingPractice(level: string, question: string, userEssay: string) {
     await this.enforcePolicy();
-    const prompt = `Grade essay Level ${level}. Question: ${question}. Essay: ${userEssay}. Return JSON {score, generalFeedback, corrections: [{original, correction, explanation}], sampleEssay, betterVocab}.`;
+    const prompt = `Grade essay Level ${level}. Question: ${question}. Essay: ${userEssay}. Return valid JSON object {score, generalFeedback, corrections: [{original, correction, explanation}], sampleEssay, betterVocab}.`;
 
     if (this.provider === 'openai') {
       return await this.callOpenAI(prompt, true);
@@ -460,12 +478,22 @@ class GeminiService {
 
   async generateGrammarQuiz(level: string, topic?: string) {
     await this.enforcePolicy();
-    const prompt = `Generate 10 Grammar Questions Level ${level} ${topic ? `about ${topic}` : ''}. Return strictly JSON array.`;
 
     if (this.provider === 'openai') {
-      return await this.callOpenAI(prompt, true);
+      const prompt = `Generate 10 Grammar Questions Level ${level} ${topic ? `about ${topic}` : ''}. 
+        Return a strictly valid JSON object with a key "questions" containing an array of objects.
+        Structure: { "questions": [{ "id": 1, "question": "...", "options": ["..."], "correctAnswer": "..." }] }`;
+
+      const jsonStr = await this.callOpenAI(prompt, true);
+      try {
+        const parsed = JSON.parse(jsonStr);
+        return JSON.stringify(parsed.questions || []);
+      } catch (e) {
+        return '[]';
+      }
     }
 
+    const prompt = `Generate 10 Grammar Questions Level ${level} ${topic ? `about ${topic}` : ''}. Return strictly JSON array.`;
     const response = await this.ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
@@ -476,7 +504,7 @@ class GeminiService {
 
   async gradeGrammarQuiz(level: string, questions: any[], userAnswers: any) {
     await this.enforcePolicy();
-    const prompt = `Grade Grammar Quiz Level ${level}. Questions: ${JSON.stringify(questions)}. User Answers: ${JSON.stringify(userAnswers)}. Return JSON {score, results: [{id, isCorrect, explanation}]}.`;
+    const prompt = `Grade Grammar Quiz Level ${level}. Questions: ${JSON.stringify(questions)}. User Answers: ${JSON.stringify(userAnswers)}. Return valid JSON object {score, results: [{id, isCorrect, explanation}]}.`;
 
     if (this.provider === 'openai') {
       return await this.callOpenAI(prompt, true);
@@ -492,7 +520,7 @@ class GeminiService {
 
   async generateReadingPassage(level: string, topic: string) {
     await this.enforcePolicy();
-    const prompt = `Write reading passage Level ${level} about "${topic}". Return JSON {title, content, summary, keywords}.`;
+    const prompt = `Write reading passage Level ${level} about "${topic}". Return valid JSON object {title, content, summary, keywords}.`;
 
     if (this.provider === 'openai') {
       return await this.callOpenAI(prompt, true);
@@ -508,7 +536,7 @@ class GeminiService {
 
   async lookupDictionary(word: string, context: string) {
     await this.enforcePolicy();
-    const prompt = `Define "${word}" in context: "${context}". Return JSON {word, ipa, type, meaning_vi, definition_en, example}.`;
+    const prompt = `Define "${word}" in context: "${context}". Return valid JSON object {word, ipa, type, meaning_vi, definition_en, example}.`;
 
     if (this.provider === 'openai') {
       return await this.callOpenAI(prompt, true);
@@ -607,7 +635,7 @@ class GeminiService {
       2. Provide 1 full, natural Sample Answer (CEFR B2/C1 Level).
       3. Provide Vietnamese translation for the Sample Answer.
 
-      Output strictly JSON:
+      Output strictly valid JSON object:
       {
         "hints": ["hint 1", "hint 2", "hint 3"],
         "sampleAnswer": "Full text answer...",
@@ -649,7 +677,7 @@ class GeminiService {
       2. Content: Concise, focused on the topic, strictly linked ideas.
       3. Vocabulary: Use high-quality vocabulary suitable for level ${level}.
       
-      Output strictly valid JSON with the following structure:
+      Output strictly valid JSON object with the following structure:
       {
         "script": "The full English monologue text...",
         "translation": "The Vietnamese translation..."

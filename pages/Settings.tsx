@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
 import { firebaseService, FirestoreUser } from '../services/firebase';
@@ -28,7 +28,7 @@ interface ErrorBoundaryProps {
     children?: React.ReactNode;
 }
 
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     state: ErrorBoundaryState = { hasError: false };
 
     static getDerivedStateFromError(error: any) {
@@ -102,18 +102,36 @@ export const Settings: React.FC = () => {
                 const authorized = await firebaseService.isUserAuthorized();
                 setIsAuthorized(authorized);
 
-                // 4. Sync Key
-                const savedKey = localStorage.getItem('dh_gemini_api_key');
-                if (savedKey) {
-                    setApiKey(savedKey);
+                // 4. Sync & Validate Key against Tier
+                let activeKey = localStorage.getItem('dh_gemini_api_key') || '';
+                const cloudKey = await firebaseService.getMyAssignedApiKey(user.uid);
+
+                // Prefer cloud key if available (sync across devices)
+                if (cloudKey) activeKey = cloudKey;
+
+                // Validate Key Format vs Tier
+                let isValidFormat = true;
+                if (activeKey) {
+                    const isOpenAI = activeKey.startsWith('sk-');
+                    // VIP must NOT be OpenAI (must be Gemini)
+                    if (tier === 'vip' && isOpenAI) isValidFormat = false;
+                    // Standard must be OpenAI
+                    if (tier === 'standard' && !isOpenAI) isValidFormat = false;
+                }
+
+                if (activeKey && isValidFormat) {
+                    geminiService.updateApiKey(activeKey);
+                    setApiKey(activeKey);
                     setKeyStatus('valid');
+                    localStorage.setItem('dh_gemini_api_key', activeKey);
                 } else {
-                    const assignedKey = await firebaseService.getMyAssignedApiKey(user.uid);
-                    if (assignedKey) {
-                        geminiService.updateApiKey(assignedKey);
-                        setApiKey(assignedKey);
-                        setKeyStatus('valid');
-                        localStorage.setItem('dh_gemini_api_key', assignedKey);
+                    // Clear invalid key to force re-entry if mismatch found
+                    setApiKey('');
+                    setKeyStatus('unknown');
+                    geminiService.removeApiKey();
+                    if (activeKey && !isValidFormat) {
+                        // Key existed but was wrong format for current tier
+                        console.log("Cleared API Key due to Tier mismatch");
                     }
                 }
 
