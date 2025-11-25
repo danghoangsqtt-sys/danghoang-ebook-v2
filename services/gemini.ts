@@ -22,6 +22,16 @@ export function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+// --- Updated Interfaces ---
+
+export interface AIFinancialAnalysis {
+  healthScore: number; // 0 - 100
+  healthRating: string; // e.g., "Excellent", "Needs Improvement"
+  keyTrends: string[];
+  anomalies: string[]; // Unusual spending
+  sentiment: string; // General summary
+}
+
 export interface AIFinancialPlan {
   recommendedBudgets: {
     name: string;
@@ -37,7 +47,7 @@ export interface AIFinancialPlan {
     deadline?: string;
     reason: string;
   }[];
-  analysisComment: string;
+  debtStrategy: string; // Advice on paying off debts
   cashflowInsight: string;
 }
 
@@ -133,33 +143,22 @@ class GeminiService {
     // Admin Bypass
     if (user && user.email === firebaseService.ADMIN_EMAIL) return;
 
-    // Helper to get Zalo Contact - using try/catch to silently fail if permission denied
-    let zaloNumber = "0343019101";
-    try {
-      const config = await firebaseService.getSystemConfig();
-      if (config && config.zaloNumber) {
-        zaloNumber = config.zaloNumber;
-      }
-    } catch (e) {
-      // Ignore permission errors for unauthenticated users to prevent noise
-    }
-
-    const contactMsg = `Vui lòng liên hệ Admin qua zalo: ${zaloNumber} để mở khóa tính năng AI và nhiều tiện ích đa dạng khác của website.`;
+    const specificErrorMsg = "Vui lòng liên hệ Admin để mở khóa tính năng AI và lưu trữ dữ liệu của bạn";
 
     // 1. Block Guests
     if (!user) {
-      throw new Error(`🔒 Vui lòng đăng nhập để sử dụng tính năng AI.\n\n${contactMsg}`);
+      throw new Error(specificErrorMsg);
     }
 
-    // 2. Block Unauthorized Users (Pending)
+    // 2. Block Unauthorized Users
     const isAuth = await firebaseService.isUserAuthorized();
     if (!isAuth) {
-      throw new Error(`🔒 Tài khoản chưa kích hoạt.\n\n${contactMsg}`);
+      throw new Error(specificErrorMsg);
     }
 
     // 3. Check API Key existence (Double check)
     if (!this.apiKey) {
-      throw new Error("Vui lòng nhập API Key trong phần Cài đặt (Ưu tiên OpenAI/ChatGPT Key).");
+      throw new Error("Vui lòng nhập API Key trong phần Cài đặt.");
     }
   }
 
@@ -191,27 +190,70 @@ class GeminiService {
     return data.choices[0].message.content || "";
   }
 
-  async analyzeFinances(transactions: Transaction[]): Promise<AIFinancialPlan> {
+  // --- 1. CURRENT SITUATION ANALYSIS ---
+  async analyzeFinancialSituation(transactions: Transaction[]): Promise<AIFinancialAnalysis> {
     await this.enforcePolicy();
-
     const recentTrans = transactions.slice(0, 100).map(t => ({
-      date: t.date,
-      amount: t.amount,
-      type: t.type,
-      category: t.category,
-      desc: t.description
+      date: t.date, amount: t.amount, type: t.type, category: t.category
     }));
 
     const prompt = `
-    You are an expert Financial Advisor for a user living in **Vietnam**.
+      You are a strict Financial Auditor. Analyze the user's recent transaction history (Vietnam context).
+      Data: ${JSON.stringify(recentTrans)}
+
+      Task:
+      1. Calculate a 'Health Score' (0-100) based purely on past behavior: income stability, expense control, and spending consistency.
+      2. Identify 3 key spending trends (e.g., "Increasing food costs", "Stable income").
+      3. Identify anomalies or warnings (e.g., "Sudden large withdrawal", "High frequency of small purchases").
+      4. Provide a sentiment summary in Vietnamese evaluating the CURRENT situation.
+
+      Output strictly JSON:
+      {
+        "healthScore": number,
+        "healthRating": "Xuất sắc" | "Tốt" | "Khá" | "Cần cải thiện" | "Báo động",
+        "keyTrends": ["trend 1", "trend 2", "trend 3"],
+        "anomalies": ["warning 1", "warning 2"],
+        "sentiment": "Vietnamese summary of current status..."
+      }
+      `;
+
+    try {
+      let text = '';
+      if (this.provider === 'openai') {
+        text = await this.callOpenAI(prompt, true);
+      } else {
+        const response = await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: { responseMimeType: 'application/json' }
+        });
+        text = response.text || '{}';
+      }
+      return JSON.parse(text.replace(/```json|```/g, '').trim());
+    } catch (e) {
+      console.error("AI Analysis Error", e);
+      throw e;
+    }
+  }
+
+  // --- 2. PLAN BUILDER (Budget, Goals, Debt) ---
+  async buildFinancialPlan(transactions: Transaction[]): Promise<AIFinancialPlan> {
+    await this.enforcePolicy();
+
+    const recentTrans = transactions.slice(0, 100).map(t => ({
+      date: t.date, amount: t.amount, type: t.type, category: t.category
+    }));
+
+    const prompt = `
+    You are an expert Financial Planner for a user in **Vietnam**.
     Context: All monetary values are in VND (Vietnam Dong).
     Data: ${JSON.stringify(recentTrans)}
     
-    Task:
-    1. Analyze spending patterns.
-    2. Suggest 3-5 Monthly Budgets.
-    3. Suggest 1-2 Financial Goals.
-    4. Provide a brief analysis comment and a specific cashflow insight in Vietnamese.
+    Task: Create a FUTURE plan.
+    1. Suggest 3-5 Monthly Budgets based on the 50/30/20 rule and actual spending habits.
+    2. Suggest 2 Financial Goals (1 short term, 1 long term) that are realistic.
+    3. Suggest a specific debt repayment or savings strategy.
+    4. Provide a cashflow optimization insight in Vietnamese.
 
     Constraint: Return strictly valid JSON.
     {
@@ -221,8 +263,8 @@ class GeminiService {
         "recommendedGoals": [
             { "name": "string", "targetAmount": number, "currentAmount": 0, "type": "savings", "deadline": "YYYY-MM-DD", "reason": "string" }
         ],
-        "analysisComment": "string",
-        "cashflowInsight": "string"
+        "debtStrategy": "string (Vietnamese)",
+        "cashflowInsight": "string (Vietnamese)"
     }
     `;
 
@@ -240,9 +282,14 @@ class GeminiService {
       }
       return JSON.parse(text.replace(/```json|```/g, '').trim());
     } catch (e) {
-      console.error("AI Finance Analysis Error", e);
-      throw new Error("AI Analysis Failed");
+      console.error("AI Planning Error", e);
+      throw e;
     }
+  }
+
+  // Keep this for backward compatibility if needed, but implementation routes to buildFinancialPlan
+  async analyzeFinances(transactions: Transaction[]): Promise<AIFinancialPlan> {
+    return this.buildFinancialPlan(transactions);
   }
 
   async analyzeMarket(prompt: string): Promise<MarketAnalysisResult> {
@@ -262,7 +309,7 @@ class GeminiService {
       return JSON.parse(text.replace(/```json|```/g, '').trim());
     } catch (e) {
       console.error("AI Market Analysis Error", e);
-      throw new Error("AI Market Analysis Failed");
+      throw e;
     }
   }
 
@@ -285,7 +332,7 @@ class GeminiService {
       }
     } catch (e) {
       console.error("Search Error", e);
-      return "Lỗi khi tìm kiếm thông tin: " + (e as any).message;
+      throw e;
     }
   }
 
@@ -294,6 +341,7 @@ class GeminiService {
     message: string,
     systemInstruction: string
   ) {
+    // Policy check inside will throw if guest
     await this.enforcePolicy();
 
     if (this.provider === 'openai') {

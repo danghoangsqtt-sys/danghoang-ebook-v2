@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { Transaction, BudgetCategory, FinancialGoal, DebtItem } from '../types';
 import { financialService } from '../services/financial';
-import { geminiService, AIFinancialPlan } from '../services/gemini';
+import { geminiService, AIFinancialPlan, AIFinancialAnalysis } from '../services/gemini';
 import { AIPlanModal } from '../components/AIPlanModal';
 import { MoneyInput } from '../components/MoneyInput';
 import { TransactionList } from '../components/TransactionList';
@@ -71,7 +71,9 @@ export const Finance: React.FC = () => {
 
     // AI States
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [aiPlan, setAiPlan] = useState<AIFinancialPlan | null>(null);
+    const [aiMode, setAiMode] = useState<'analysis' | 'planning' | null>(null);
+    const [aiPlan, setAiPlan] = useState<AIFinancialPlan | undefined>(undefined);
+    const [aiAnalysis, setAiAnalysis] = useState<AIFinancialAnalysis | undefined>(undefined);
 
     // --- Data Fetching Logic ---
     const fetchData = async (user: firebase.User) => {
@@ -203,21 +205,24 @@ export const Finance: React.FC = () => {
     };
 
     // --- AI Analysis Workflow ---
-    const handleAIAnalysis = async () => {
-        if (!currentUser) return alert("Vui lòng đăng nhập để sử dụng AI Financial Advisor.");
-        if (!geminiService.hasKey()) return alert("Vui lòng nhập API Key trong Cài Đặt.");
-
+    const handleRunAI = async (mode: 'analysis' | 'planning') => {
         setIsAnalyzing(true);
+        setAiMode(mode);
+        setAiPlan(undefined);
+        setAiAnalysis(undefined);
+
         try {
-            const plan = await geminiService.analyzeFinances(transactions);
-            setAiPlan(plan);
-        } catch (e: any) {
-            // Check for policy enforcement message
-            if (e.message.includes('🔒')) {
-                alert(e.message);
+            if (mode === 'analysis') {
+                const result = await geminiService.analyzeFinancialSituation(transactions);
+                setAiAnalysis(result);
             } else {
-                alert("Lỗi phân tích AI: " + e.message);
+                const result = await geminiService.buildFinancialPlan(transactions);
+                setAiPlan(result);
             }
+        } catch (e: any) {
+            // The error message is thrown directly by geminiService.enforcePolicy
+            alert(e.message);
+            setAiMode(null);
         } finally {
             setIsAnalyzing(false);
         }
@@ -231,12 +236,14 @@ export const Finance: React.FC = () => {
                 newBudgets,
                 newGoals,
                 {
-                    analysisComment: aiPlan.analysisComment,
+                    analysisComment: "Đã áp dụng kế hoạch tự động.",
                     cashflowInsight: aiPlan.cashflowInsight
                 }
             );
-            setAiMetadata({ analysisComment: aiPlan.analysisComment, cashflowInsight: aiPlan.cashflowInsight });
-            setAiPlan(null);
+            // Update metadata only on success
+            setAiMetadata({ analysisComment: "Kế hoạch mới đã được áp dụng.", cashflowInsight: aiPlan.cashflowInsight });
+            setAiMode(null);
+            setAiPlan(undefined);
             alert("Đã áp dụng kế hoạch tài chính mới!");
             handleRefresh(); // Refresh to show new budgets/goals
         } catch (e: any) {
@@ -418,32 +425,40 @@ export const Finance: React.FC = () => {
                         <button onClick={() => navigateDate(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300">▶</button>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                         <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl">
                             <button onClick={() => setStatsMode('month')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-all ${statsMode === 'month' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Tháng</button>
                             <button onClick={() => setStatsMode('year')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-all ${statsMode === 'year' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Năm</button>
                         </div>
-                        <button
-                            onClick={handleAIAnalysis}
-                            disabled={isAnalyzing}
-                            className="px-4 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center gap-2 disabled:opacity-70"
-                        >
-                            {isAnalyzing ? <span className="animate-spin">↻</span> : <span>🤖</span>}
-                            <span className="hidden sm:inline">AI Advisor</span>
-                        </button>
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => handleRunAI('analysis')}
+                                disabled={isAnalyzing}
+                                className="flex-1 sm:flex-none px-4 py-1.5 bg-white border border-blue-200 dark:bg-gray-800 dark:border-gray-700 text-blue-600 dark:text-blue-400 font-bold rounded-xl shadow-sm hover:bg-blue-50 dark:hover:bg-gray-700 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
+                            >
+                                {isAnalyzing && aiMode === 'analysis' ? <span className="animate-spin">↻</span> : '🔍'}
+                                <span className="text-xs sm:text-sm">Phân tích Tình hình</span>
+                            </button>
+                            <button
+                                onClick={() => handleRunAI('planning')}
+                                disabled={isAnalyzing}
+                                className="flex-1 sm:flex-none px-4 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
+                            >
+                                {isAnalyzing && aiMode === 'planning' ? <span className="animate-spin">↻</span> : '📅'}
+                                <span className="text-xs sm:text-sm">Lập Kế Hoạch</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                {/* AI Insight Card */}
+                {/* AI Insight Card (Static or from previous analysis) */}
                 {aiMetadata.analysisComment && (
                     <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 p-4 rounded-xl flex gap-3 items-start animate-fade-in-up">
                         <div className="text-2xl">💡</div>
                         <div>
-                            <h4 className="font-bold text-indigo-900 dark:text-indigo-200 text-sm">Nhận định từ AI</h4>
+                            <h4 className="font-bold text-indigo-900 dark:text-indigo-200 text-sm">Thông điệp từ AI</h4>
                             <p className="text-sm text-indigo-800 dark:text-indigo-300 mt-1 leading-relaxed">{aiMetadata.analysisComment}</p>
-                            {aiMetadata.cashflowInsight && (
-                                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-2 font-medium italic">"{aiMetadata.cashflowInsight}"</p>
-                            )}
                         </div>
                     </div>
                 )}
@@ -1132,12 +1147,14 @@ export const Finance: React.FC = () => {
             )}
 
             {/* AI Plan Modal */}
-            {aiPlan && (
+            {(aiPlan || aiAnalysis) && (
                 <AIPlanModal
-                    isOpen={!!aiPlan}
-                    onClose={() => setAiPlan(null)}
+                    isOpen={!!(aiPlan || aiAnalysis)}
+                    mode={aiMode || 'analysis'}
+                    onClose={() => { setAiPlan(undefined); setAiAnalysis(undefined); setAiMode(null); }}
                     onSave={handleSaveAIPlan}
-                    plan={aiPlan}
+                    planData={aiPlan}
+                    analysisData={aiAnalysis}
                 />
             )}
         </div>
