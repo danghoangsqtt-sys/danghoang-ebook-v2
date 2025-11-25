@@ -85,26 +85,31 @@ export const AdminDashboard: React.FC = () => {
         if (activationDuration === -1) {
             expirationTime = null; // Permanent
         } else if (activationDuration === 0 && customDate) {
-            expirationTime = new Date(customDate).getTime();
+            const parsed = new Date(customDate).getTime();
+            expirationTime = isNaN(parsed) ? null : parsed;
         } else {
             expirationTime = Date.now() + (activationDuration * 24 * 60 * 60 * 1000);
         }
 
+        // Explicitly default aiTier to avoid undefined
+        const finalTier = activationTier || 'standard';
+
         const updateData: Partial<FirestoreUser> = {
             isActiveAI: true,
-            aiTier: activationTier,
+            aiTier: finalTier,
             aiActivationDate: Date.now(),
             aiExpirationDate: expirationTime,
-            violationReason: null // Use null instead of undefined to clear the field safely
+            violationReason: null // Correctly set to null to clear it
         };
 
         try {
             await firebaseService.updateUserStatus(selectedUser.uid, updateData);
             setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, ...updateData } : u));
-            addLog(`Kích hoạt ${activationTier.toUpperCase()} cho ${selectedUser.name} (Hết hạn: ${expirationTime ? new Date(expirationTime).toLocaleDateString() : 'Vĩnh viễn'})`, 'success');
+            addLog(`Kích hoạt ${finalTier.toUpperCase()} cho ${selectedUser.name} (Hết hạn: ${expirationTime ? new Date(expirationTime).toLocaleDateString() : 'Vĩnh viễn'})`, 'success');
             setShowActivateModal(false);
         } catch (e) {
-            alert("Lỗi kích hoạt.");
+            console.error(e);
+            alert("Lỗi kích hoạt: " + (e as any).message);
         } finally {
             setIsSubmitting(false);
         }
@@ -124,7 +129,7 @@ export const AdminDashboard: React.FC = () => {
                 isActiveAI: false,
                 storageEnabled: false,
                 aiExpirationDate: null, // Clear subscription
-                violationReason: punishReason,
+                violationReason: punishReason || 'Vi phạm điều khoản',
                 isLocked: true // Optionally lock account entirely
             };
 

@@ -60,23 +60,31 @@ class FirebaseService {
     }
 
     // --- UTILS ---
-    private sanitizeForFirestore(obj: any): any {
-        if (obj === undefined) return null;
-        if (obj === null || typeof obj !== 'object') return obj;
-        if (obj instanceof Date) return obj;
+    private cleanData(data: any): any {
+        if (data === undefined) return undefined;
+        if (data === null) return null;
+        if (typeof data === 'number' && isNaN(data)) return null; // Safety for NaN
+        if (data instanceof Date) return data;
 
-        if (Array.isArray(obj)) {
-            return obj.map(v => this.sanitizeForFirestore(v));
+        if (Array.isArray(data)) {
+            return data.map(item => this.cleanData(item)).filter(item => item !== undefined);
         }
 
-        const newObj: any = {};
-        for (const key in obj) {
-            if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                const val = this.sanitizeForFirestore(obj[key]);
-                newObj[key] = val;
+        if (typeof data === 'object') {
+            const result: any = {};
+            for (const key in data) {
+                if (Object.prototype.hasOwnProperty.call(data, key)) {
+                    const cleaned = this.cleanData(data[key]);
+                    // Only keep keys that are NOT undefined
+                    if (cleaned !== undefined) {
+                        result[key] = cleaned;
+                    }
+                }
             }
+            return result;
         }
-        return newObj;
+
+        return data;
     }
 
     async loginWithGoogle(): Promise<{ user: firebase.User, token?: string, apiKey?: string } | null> {
@@ -161,7 +169,8 @@ class FirebaseService {
                 updateData.aiExpirationDate = null; // Permanent
             }
 
-            await docRef.set(updateData, { merge: true });
+            // We use cleanData just in case, though raw inputs here should be fine
+            await docRef.set(this.cleanData(updateData), { merge: true });
         } catch (e) {
             console.error("Error syncing user to DB", e);
         }
@@ -214,8 +223,10 @@ class FirebaseService {
     async updateUserStatus(uid: string, data: Partial<FirestoreUser>) {
         if (this.currentUser?.email !== this.ADMIN_EMAIL) return;
         try {
-            const sanitizedData = this.sanitizeForFirestore(data);
-            await this.db.collection("users").doc(uid).set(sanitizedData, { merge: true });
+            // CRITICAL FIX: Firestore crashes on 'undefined'. 
+            // cleanData() removes undefined keys while preserving nulls (for field deletion/reset).
+            const safeData = this.cleanData(data);
+            await this.db.collection("users").doc(uid).set(safeData, { merge: true });
         } catch (e) {
             console.error("Error updating user status", e);
             throw e;
@@ -239,7 +250,7 @@ class FirebaseService {
         const uid = data.uid || `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
         try {
-            await this.db.collection("users").doc(uid).set({
+            const safeData = this.cleanData({
                 ...data,
                 uid,
                 createdAt: Date.now(),
@@ -250,6 +261,7 @@ class FirebaseService {
                 isLocked: false,
                 role: 'user'
             });
+            await this.db.collection("users").doc(uid).set(safeData);
             return uid;
         } catch (e) {
             console.error("Error creating user profile", e);
@@ -342,7 +354,10 @@ class FirebaseService {
 
     async saveUserData(moduleName: string, data: any) {
         const localKey = `dh_${moduleName}`;
-        const sanitizedData = this.sanitizeForFirestore(data);
+        // cleanData is not needed here as localStorage uses JSON.stringify which handles basics, 
+        // but for consistency we can use it if data might have undefineds.
+        // For now, just basic sanity.
+        const sanitizedData = this.cleanData(data);
         localStorage.setItem(localKey, JSON.stringify(sanitizedData));
 
         if (this.currentUser) {
@@ -369,7 +384,7 @@ class FirebaseService {
 
         if (this.currentUser && await this.isUserAuthorized()) {
             try {
-                await this.db.collection("users").doc(this.currentUser.uid).collection("speaking_history").add(session);
+                await this.db.collection("users").doc(this.currentUser.uid).collection("speaking_history").add(this.cleanData(session));
             } catch (e) {
                 console.error("Error saving speaking session to cloud", e);
             }
@@ -421,7 +436,7 @@ class FirebaseService {
     }
 
     async saveCourseTree(tree: CourseNode[]) {
-        const sanitizedTree = this.sanitizeForFirestore(tree);
+        const sanitizedTree = this.cleanData(tree);
         try {
             localStorage.setItem('dh_course_tree_v2', JSON.stringify(sanitizedTree));
         } catch (e) { }
@@ -515,7 +530,7 @@ class FirebaseService {
     async updateSystemConfig(data: any) {
         if (this.currentUser?.email !== this.ADMIN_EMAIL) throw new Error("Unauthorized");
         try {
-            await this.db.collection('system').doc('public').set(data, { merge: true });
+            await this.db.collection('system').doc('public').set(this.cleanData(data), { merge: true });
         } catch (e) {
             console.error("Error updating system config", e);
             throw e;
