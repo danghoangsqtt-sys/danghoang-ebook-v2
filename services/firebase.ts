@@ -34,7 +34,7 @@ export interface FirestoreUser {
     // New Fields for Time-based Access & Violations
     aiActivationDate?: number;
     aiExpirationDate?: number | null; // null means permanent
-    violationReason?: string;
+    violationReason?: string | null;
 }
 
 class FirebaseService {
@@ -214,7 +214,8 @@ class FirebaseService {
     async updateUserStatus(uid: string, data: Partial<FirestoreUser>) {
         if (this.currentUser?.email !== this.ADMIN_EMAIL) return;
         try {
-            await this.db.collection("users").doc(uid).set(data, { merge: true });
+            const sanitizedData = this.sanitizeForFirestore(data);
+            await this.db.collection("users").doc(uid).set(sanitizedData, { merge: true });
         } catch (e) {
             console.error("Error updating user status", e);
             throw e;

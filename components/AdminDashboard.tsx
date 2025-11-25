@@ -95,7 +95,7 @@ export const AdminDashboard: React.FC = () => {
             aiTier: activationTier,
             aiActivationDate: Date.now(),
             aiExpirationDate: expirationTime,
-            violationReason: undefined // Clear any violation
+            violationReason: null // Use null instead of undefined to clear the field safely
         };
 
         try {
@@ -342,7 +342,6 @@ export const AdminDashboard: React.FC = () => {
                 </div>
             )}
 
-            {/* ... (Other Modals: Add, View - kept as is) ... */}
             {/* ADD USER MODAL */}
             {showAddModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
