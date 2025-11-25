@@ -8,11 +8,12 @@ interface AIPlanModalProps {
     mode: 'analysis' | 'planning';
     onClose: () => void;
     onSave?: (budgets: BudgetCategory[], goals: FinancialGoal[]) => void;
+    onSaveAnalysis?: () => void;
     planData?: AIFinancialPlan;
     analysisData?: AIFinancialAnalysis;
 }
 
-export const AIPlanModal: React.FC<AIPlanModalProps> = ({ isOpen, mode, onClose, onSave, planData, analysisData }) => {
+export const AIPlanModal: React.FC<AIPlanModalProps> = ({ isOpen, mode, onClose, onSave, onSaveAnalysis, planData, analysisData }) => {
     const [budgets, setBudgets] = useState<any[]>([]);
     const [goals, setGoals] = useState<any[]>([]);
 
@@ -116,8 +117,9 @@ export const AIPlanModal: React.FC<AIPlanModalProps> = ({ isOpen, mode, onClose,
                         </div>
                     </div>
 
-                    <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex justify-end">
+                    <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex justify-end gap-3">
                         <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-white rounded-xl font-bold transition-colors">Đóng</button>
+                        <button onClick={onSaveAnalysis} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors shadow-md">Lưu phân tích</button>
                     </div>
                 </div>
             </div>

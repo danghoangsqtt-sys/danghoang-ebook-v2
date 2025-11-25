@@ -228,6 +228,21 @@ export const Finance: React.FC = () => {
         }
     };
 
+    const handleSaveAnalysis = async () => {
+        if (!currentUser || !aiAnalysis) return;
+        try {
+            await financialService.updateFinanceMetadata(currentUser.uid, {
+                analysisComment: aiAnalysis.sentiment
+            });
+            setAiMetadata(prev => ({ ...prev, analysisComment: aiAnalysis.sentiment }));
+            setAiMode(null);
+            setAiAnalysis(undefined);
+            alert("Đã lưu phân tích vào trang tổng quan!");
+        } catch (e: any) {
+            alert("Lỗi khi lưu phân tích: " + e.message);
+        }
+    };
+
     const handleSaveAIPlan = async (newBudgets: BudgetCategory[], newGoals: FinancialGoal[]) => {
         if (!currentUser || !aiPlan) return;
         try {
@@ -1153,6 +1168,7 @@ export const Finance: React.FC = () => {
                     mode={aiMode || 'analysis'}
                     onClose={() => { setAiPlan(undefined); setAiAnalysis(undefined); setAiMode(null); }}
                     onSave={handleSaveAIPlan}
+                    onSaveAnalysis={handleSaveAnalysis}
                     planData={aiPlan}
                     analysisData={aiAnalysis}
                 />

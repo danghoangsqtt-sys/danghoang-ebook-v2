@@ -203,9 +203,9 @@ class GeminiService {
 
       Task:
       1. Calculate a 'Health Score' (0-100) based purely on past behavior: income stability, expense control, and spending consistency.
-      2. Identify 3 key spending trends (e.g., "Increasing food costs", "Stable income").
-      3. Identify anomalies or warnings (e.g., "Sudden large withdrawal", "High frequency of small purchases").
-      4. Provide a sentiment summary in Vietnamese evaluating the CURRENT situation.
+      2. Identify 3 key spending trends (e.g., "Chi tiêu ăn uống tăng cao", "Thu nhập ổn định").
+      3. Identify anomalies or warnings (e.g., "Giao dịch lớn bất thường", "Tần suất rút tiền cao").
+      4. Provide a sentiment summary in Vietnamese evaluating the CURRENT situation (Keep it concise for a dashboard summary).
 
       Output strictly JSON:
       {

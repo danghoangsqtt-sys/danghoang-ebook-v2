@@ -308,6 +308,20 @@ class FinancialService {
 
         await batch.commit();
     }
+
+    async updateFinanceMetadata(uid: string, metadata: { analysisComment: string }) {
+        try {
+            await this.db.collection('users').doc(uid).set({
+                finance_metadata: {
+                    lastAIAnalysis: firebase.firestore.FieldValue.serverTimestamp(),
+                    analysisComment: metadata.analysisComment,
+                }
+            }, { merge: true });
+        } catch (e) {
+            console.error("Error updating finance metadata", e);
+            throw e;
+        }
+    }
 }
 
 export const financialService = new FinancialService();
