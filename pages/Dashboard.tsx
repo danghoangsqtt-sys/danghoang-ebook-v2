@@ -307,7 +307,6 @@ export const Dashboard: React.FC = () => {
                     <QuickActionBtn icon="✅" label="Thêm Task" onClick={() => navigate('/planner')} colorClass="bg-green-50 dark:bg-green-900/20 text-green-600 border-green-100 dark:border-green-800 hover:bg-green-100" />
                     <QuickActionBtn icon="💸" label="Ghi Chi Tiêu" onClick={() => navigate('/finance')} colorClass="bg-red-50 dark:bg-red-900/20 text-red-600 border-red-100 dark:border-red-800 hover:bg-red-100" />
                     <QuickActionBtn icon="📂" label="Tài Liệu" onClick={() => navigate('/courses')} colorClass="bg-purple-50 dark:bg-purple-900/20 text-purple-600 border-purple-100 dark:border-purple-800 hover:bg-purple-100" />
-                    <QuickActionBtn icon="🤖" label="Hỏi AI" onClick={() => document.querySelector('button[class*="fixed bottom"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))} colorClass="bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100" />
                 </div>
             </div>
 

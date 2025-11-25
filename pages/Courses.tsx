@@ -249,13 +249,6 @@ const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onT
                 </div>
 
                 <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onAction('pin', node); }}
-                        className={`p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-xs transition-colors ${node.isPinned ? 'text-blue-600 bg-blue-100/50 dark:bg-blue-900/30' : 'text-gray-400 hover:text-gray-600'}`}
-                        title={node.isPinned ? "Bỏ ghim" : "Ghim quan trọng"}
-                    >
-                        📌
-                    </button>
                     <button onClick={(e) => { e.stopPropagation(); onAction('edit', node); }} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-400 text-xs" title="Sửa / Di chuyển">✏️</button>
                     <button onClick={(e) => { e.stopPropagation(); onAction('delete', node); }} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500 text-xs" title="Xóa">🗑️</button>
                 </div>
@@ -335,6 +328,8 @@ export const Courses: React.FC = () => {
     const [selectedLesson, setSelectedLesson] = useState<LessonContent | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isNoteOpen, setIsNoteOpen] = useState(false); // State for Note sidebar
+    const [noteContent, setNoteContent] = useState('');
 
     // Modal
     const [isModalOpen, setModalOpen] = useState(false);
@@ -392,6 +387,13 @@ export const Courses: React.FC = () => {
             firebaseService.saveCourseTree(courseTree);
         }
     }, [courseTree]);
+
+    // When lesson changes, update note content and ensure note sidebar state
+    useEffect(() => {
+        if (selectedLesson) {
+            setNoteContent(selectedLesson.notes || '');
+        }
+    }, [selectedLesson]);
 
     // Breadcrumbs
     const breadcrumbs = useMemo(() => {
@@ -545,6 +547,21 @@ export const Courses: React.FC = () => {
         resetForm();
     };
 
+    // --- Note Functions ---
+    const handleSaveNote = () => {
+        if (!selectedLesson) return;
+
+        // 1. Update selectedLesson local state
+        setSelectedLesson({ ...selectedLesson, notes: noteContent });
+
+        // 2. Update tree data
+        setCourseTree(prevTree => updateNode(prevTree, selectedLesson.id, {
+            data: { ...selectedLesson, notes: noteContent }
+        }));
+
+        // Note: Tree saving to Firebase/Local storage is handled by useEffect on [courseTree]
+    };
+
     const renderFolderOptions = (nodes: CourseNode[], depth = 0): React.ReactNode[] => {
         let opts: React.ReactNode[] = [];
         nodes.forEach(n => {
@@ -679,6 +696,16 @@ export const Courses: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-2">
                                 {selectedLesson.topic && <span className="hidden sm:block text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 py-1 rounded font-bold uppercase">{selectedLesson.topic}</span>}
+
+                                {/* Toggle Note Button */}
+                                <button
+                                    onClick={() => setIsNoteOpen(!isNoteOpen)}
+                                    className={`p-2 rounded-lg transition-colors ${isNoteOpen ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+                                    title={isNoteOpen ? "Đóng ghi chú" : "Mở ghi chú"}
+                                >
+                                    📝
+                                </button>
+
                                 <button
                                     onClick={() => {
                                         const node = findNode(courseTree, selectedLesson.id);
@@ -692,9 +719,46 @@ export const Courses: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Viewer Body */}
-                        <div className="flex-1 relative overflow-hidden">
-                            <FileViewer lesson={selectedLesson} />
+                        {/* Viewer Body with Note Sidebar */}
+                        <div className="flex-1 relative overflow-hidden flex flex-row">
+                            {/* Content */}
+                            <div className="flex-1 h-full relative overflow-hidden bg-gray-100 dark:bg-black">
+                                <FileViewer lesson={selectedLesson} />
+                            </div>
+
+                            {/* Note Sidebar */}
+                            {isNoteOpen && (
+                                <div className="w-80 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 flex flex-col shrink-0 shadow-xl z-30 transition-all duration-300 absolute md:static right-0 bottom-0 top-0 h-full">
+                                    <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-yellow-50/50 dark:bg-yellow-900/10">
+                                        <h3 className="font-bold text-sm text-gray-800 dark:text-white flex items-center gap-2">
+                                            <span>📝</span> Ghi chú bài học
+                                        </h3>
+                                        <button onClick={() => setIsNoteOpen(false)} className="md:hidden text-gray-400">✕</button>
+                                    </div>
+                                    <div className="flex-1 p-4 overflow-y-auto">
+                                        <textarea
+                                            className="w-full h-full resize-none outline-none bg-transparent text-sm text-gray-800 dark:text-gray-200 leading-relaxed placeholder-gray-400"
+                                            placeholder="Viết ghi chú cho bài học này..."
+                                            value={noteContent}
+                                            onChange={(e) => setNoteContent(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="p-3 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
+                                        <button
+                                            onClick={() => { setNoteContent(''); handleSaveNote(); }}
+                                            className="text-xs text-red-500 hover:text-red-700 font-medium px-2"
+                                        >
+                                            Xóa trắng
+                                        </button>
+                                        <button
+                                            onClick={handleSaveNote}
+                                            className="px-4 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                                        >
+                                            Lưu ghi chú
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </>
                 ) : (
