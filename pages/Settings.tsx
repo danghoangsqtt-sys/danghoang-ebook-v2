@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
-import { firebaseService } from '../services/firebase';
+import { firebaseService, FirestoreUser } from '../services/firebase';
 import { geminiService } from '../services/gemini';
 import { speechService, VoiceSettings, DEFAULT_VOICE_SETTINGS } from '../services/speech';
 import firebase from 'firebase/compat/app'; // Ensure firebase types are available
@@ -14,6 +15,10 @@ const DATA_KEYS = [
     'dh_user_profile', 'dh_theme', 'dh_gemini_api_key', 'dh_chat_history',
     'dh_voice_settings'
 ];
+
+interface ExtendedUserProfile extends UserProfile {
+    aiTier?: 'standard' | 'vip';
+}
 
 interface ErrorBoundaryState {
     hasError: boolean;
@@ -48,7 +53,7 @@ export const Settings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'account' | 'preferences' | 'voice' | 'data' | 'help'>('preferences');
 
     // User State
-    const [profile, setProfile] = useState<UserProfile>({ name: 'Khách', avatar: '👨‍💻', email: '' });
+    const [profile, setProfile] = useState<ExtendedUserProfile>({ name: 'Khách', avatar: '👨‍💻', email: '' });
     const [isAdmin, setIsAdmin] = useState(false);
     const [isAuthorized, setIsAuthorized] = useState(false);
     const [adminZalo, setAdminZalo] = useState('0343019101'); // Default
@@ -72,12 +77,23 @@ export const Settings: React.FC = () => {
     useEffect(() => {
         const syncProfile = async (user: firebase.User | null) => {
             if (user) {
-                // 1. Construct Profile from Live Auth Data
-                const p: UserProfile = {
+                // Fetch detailed user doc for tier info
+                let tier: 'standard' | 'vip' | undefined = undefined;
+                try {
+                    const doc = await firebaseService.db.collection("users").doc(user.uid).get();
+                    if (doc.exists) {
+                        const data = doc.data();
+                        tier = data?.aiTier;
+                    }
+                } catch (e) { }
+
+                // 1. Construct Profile from Live Auth Data + Tier
+                const p: ExtendedUserProfile = {
                     name: user.displayName || 'User',
                     email: user.email || '',
                     avatar: user.photoURL || '👨‍💻',
-                    uid: user.uid
+                    uid: user.uid,
+                    aiTier: tier
                 };
                 setProfile(p);
 
@@ -437,28 +453,33 @@ export const Settings: React.FC = () => {
                                                 {keyStatus !== 'valid' || isEditingKey ? (
                                                     <>
                                                         {/* Step-by-Step Guide */}
-                                                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 rounded-2xl p-6">
-                                                            <h3 className="font-bold text-green-800 dark:text-green-300 text-lg mb-4 flex items-center gap-2">
-                                                                <span>🤖</span> Hướng dẫn lấy OpenAI API Key (ChatGPT)
+                                                        <div className={`${profile.aiTier === 'vip' ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-100' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100'} border dark:border-gray-800 rounded-2xl p-6`}>
+                                                            <h3 className={`font-bold ${profile.aiTier === 'vip' ? 'text-purple-800 dark:text-purple-300' : 'text-blue-800 dark:text-blue-300'} text-lg mb-4 flex items-center gap-2`}>
+                                                                <span>🤖</span> Hướng dẫn lấy API Key ({profile.aiTier === 'vip' ? 'VIP: Gemini' : 'Standard: OpenAI'})
                                                             </h3>
+
                                                             <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
+                                                                    <span className="bg-gray-200 text-gray-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">1</span>
                                                                     <p>
-                                                                        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-green-600 font-bold hover:underline">Bấm vào đây</a> để mở trang OpenAI Platform.
+                                                                        {profile.aiTier === 'vip' ? (
+                                                                            <>Truy cập <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-purple-600 font-bold hover:underline">Google AI Studio</a>.</>
+                                                                        ) : (
+                                                                            <>Truy cập <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-blue-600 font-bold hover:underline">OpenAI Platform</a>.</>
+                                                                        )}
                                                                     </p>
                                                                 </div>
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
-                                                                    <p>Đăng nhập tài khoản ChatGPT của bạn ➝ Bấm <b>[Create new secret key]</b>.</p>
+                                                                    <span className="bg-gray-200 text-gray-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">2</span>
+                                                                    <p>{profile.aiTier === 'vip' ? 'Bấm [Create API Key] ➝ Chọn project Google Cloud.' : 'Đăng nhập ➝ Bấm [Create new secret key].'}</p>
                                                                 </div>
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
-                                                                    <p>Đặt tên tùy ý (VD: NanaAI) ➝ Copy mã Key bắt đầu bằng <code>sk-...</code>.</p>
+                                                                    <span className="bg-gray-200 text-gray-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">3</span>
+                                                                    <p>Copy mã Key bắt đầu bằng <code>{profile.aiTier === 'vip' ? 'AIza...' : 'sk-...'}</code>.</p>
                                                                 </div>
                                                                 <div className="flex gap-3 items-start">
-                                                                    <span className="bg-green-200 text-green-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
-                                                                    <p>Quay lại đây và dán vào ô bên dưới. (Hệ thống cũng hỗ trợ Gemini Key nếu bạn có).</p>
+                                                                    <span className="bg-gray-200 text-gray-800 font-bold w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs">4</span>
+                                                                    <p>Dán vào ô bên dưới để kích hoạt {profile.aiTier === 'vip' ? 'đầy đủ tính năng VIP' : 'tính năng Standard'}.</p>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -472,7 +493,7 @@ export const Settings: React.FC = () => {
                                                                         value={apiKey}
                                                                         onChange={(e) => setApiKey(e.target.value)}
                                                                         className="w-full border border-gray-300 dark:border-gray-600 rounded-xl pl-4 pr-4 py-3 text-sm focus:ring-2 focus:ring-green-500 outline-none bg-white dark:bg-gray-700 dark:text-white transition-colors font-mono"
-                                                                        placeholder="Dán key vào đây (sk-... hoặc AIza...)"
+                                                                        placeholder={profile.aiTier === 'vip' ? "Dán Gemini Key (AIza...)" : "Dán OpenAI Key (sk-...)"}
                                                                     />
                                                                 </div>
                                                                 <div className="flex gap-2">
@@ -489,7 +510,7 @@ export const Settings: React.FC = () => {
                                                                 </div>
                                                             </div>
                                                             <p className="text-xs text-gray-400 mt-2 ml-1">
-                                                                * Key của bạn được lưu an toàn trên thiết bị và đồng bộ với tài khoản Google của riêng bạn.
+                                                                * Key của bạn được lưu an toàn trên thiết bị và đồng bộ với tài khoản của riêng bạn.
                                                             </p>
                                                         </div>
                                                     </>
@@ -512,9 +533,14 @@ export const Settings: React.FC = () => {
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                        <p className="text-xs text-green-600 mt-3 flex items-center gap-1 font-medium">
-                                                            <span className="w-2 h-2 bg-green-500 rounded-full"></span> Đang hoạt động ({apiKey.startsWith('sk-') ? 'OpenAI' : 'Google Gemini'})
-                                                        </p>
+                                                        <div className="flex items-center gap-4 mt-3">
+                                                            <p className="text-xs text-green-600 flex items-center gap-1 font-medium">
+                                                                <span className="w-2 h-2 bg-green-500 rounded-full"></span> Đang hoạt động ({apiKey.startsWith('sk-') ? 'OpenAI' : 'Google Gemini'})
+                                                            </p>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase ${profile.aiTier === 'vip' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-blue-100 text-blue-700 border-blue-200'}`}>
+                                                                {profile.aiTier === 'vip' ? 'Tier: VIP' : 'Tier: Standard'}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
@@ -660,6 +686,11 @@ export const Settings: React.FC = () => {
                                                                 <span>⚠️</span> Chưa kích hoạt
                                                             </span>
                                                         )}
+                                                        {profile.aiTier && (
+                                                            <span className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${profile.aiTier === 'vip' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                                <span>⭐</span> Level: {profile.aiTier.toUpperCase()}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -729,7 +760,7 @@ export const Settings: React.FC = () => {
                                     <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Trợ giúp</h2>
                                     <div className="grid gap-4">
                                         {[
-                                            { q: 'Google Calendar không đồng bộ?', a: 'Đảm bảo bạn đã đăng nhập Google và cấp quyền truy cập lịch. Kiểm tra trạng thái trong tab "Tài khoản".' },
+                                            { q: 'Standard và VIP khác gì nhau?', a: 'Standard dùng OpenAI (giới hạn LiveChat & Phân tích). VIP dùng Gemini (đầy đủ tính năng).' },
                                             { q: 'Dữ liệu của tôi lưu ở đâu?', a: 'Mặc định lưu trên trình duyệt (LocalStorage). Nếu được kích hoạt, dữ liệu sẽ đồng bộ lên Firebase Cloud.' },
                                             { q: 'Làm sao để kích hoạt AI?', a: `Vui lòng liên hệ Admin để được cấp quyền truy cập.` },
                                             { q: 'Chế độ Khách có mất dữ liệu không?', a: 'Có, nếu bạn xóa cache trình duyệt. Hãy dùng tính năng "Xuất dữ liệu" thường xuyên.' }

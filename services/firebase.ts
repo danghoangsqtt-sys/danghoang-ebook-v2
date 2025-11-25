@@ -24,6 +24,7 @@ export interface FirestoreUser {
     lastLogin: number;
     geminiApiKey?: string;
     isActiveAI?: boolean;
+    aiTier?: 'standard' | 'vip'; // New field for tiers
     storageEnabled?: boolean;
     isLocked?: boolean;
     role?: 'admin' | 'user';
@@ -129,14 +130,26 @@ class FirebaseService {
     private async syncUserToFirestore(user: firebase.User) {
         try {
             const isSysAdmin = user.email === this.ADMIN_EMAIL;
-            await this.db.collection("users").doc(user.uid).set({
+            // Only set defaults if not exists, preserve existing tier
+            const docRef = this.db.collection("users").doc(user.uid);
+            const docSnap = await docRef.get();
+
+            const updateData: any = {
                 uid: user.uid,
                 name: user.displayName || 'No Name',
                 email: user.email || 'No Email',
                 avatar: user.photoURL || '',
                 lastLogin: Date.now(),
-                ...(isSysAdmin ? { isActiveAI: true, storageEnabled: true, role: 'admin' } : {})
-            }, { merge: true });
+            };
+
+            if (isSysAdmin) {
+                updateData.isActiveAI = true;
+                updateData.aiTier = 'vip';
+                updateData.storageEnabled = true;
+                updateData.role = 'admin';
+            }
+
+            await docRef.set(updateData, { merge: true });
         } catch (e) {
             console.error("Error syncing user to DB", e);
         }
@@ -225,6 +238,7 @@ class FirebaseService {
                 createdAt: Date.now(),
                 lastLogin: 0,
                 isActiveAI: data.isActiveAI || false,
+                aiTier: data.aiTier || 'standard',
                 storageEnabled: data.storageEnabled || false,
                 isLocked: false,
                 role: 'user'

@@ -103,15 +103,23 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onU
                                         <button
                                             onClick={() => onToggleStatus(user.uid, 'isActiveAI')}
                                             disabled={user.isLocked}
-                                            className={`p-1.5 rounded-lg border transition-all ${user.isActiveAI ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white opacity-60'}`}
-                                            title="Toggle AI"
+                                            className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 ${user.isActiveAI && user.aiTier === 'vip'
+                                                    ? 'bg-purple-50 border-purple-200 text-purple-600 shadow-sm'
+                                                    : user.isActiveAI
+                                                        ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm'
+                                                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white opacity-60'
+                                                }`}
+                                            title={`AI Access: ${user.aiTier ? user.aiTier.toUpperCase() : 'OFF'}`}
                                         >
-                                            🤖
+                                            {user.isActiveAI && user.aiTier === 'vip' ? '🌟' : '🤖'}
+                                            <span className="text-[10px] font-bold uppercase">
+                                                {user.isActiveAI ? (user.aiTier === 'vip' ? 'VIP' : 'STD') : 'OFF'}
+                                            </span>
                                         </button>
                                         <button
                                             onClick={() => onToggleStatus(user.uid, 'storageEnabled')}
                                             disabled={user.isLocked}
-                                            className={`p-1.5 rounded-lg border transition-all ${user.storageEnabled ? 'bg-purple-50 border-purple-200 text-purple-600 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white opacity-60'}`}
+                                            className={`p-1.5 rounded-lg border transition-all ${user.storageEnabled ? 'bg-green-50 border-green-200 text-green-600 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white opacity-60'}`}
                                             title="Toggle Storage"
                                         >
                                             💾

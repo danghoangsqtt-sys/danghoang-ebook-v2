@@ -81,6 +81,7 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
     const [market, setMarket] = useState<MarketData | null>(null);
     const [aiResult, setAiResult] = useState<MarketAnalysisResult | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
+    const [isStandardTier, setIsStandardTier] = useState(false);
 
     // News State
     const [newsContent, setNewsContent] = useState<string>("");
@@ -90,12 +91,24 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
         const load = async () => {
             const data = await marketService.getMarketData();
             setMarket(data);
+
+            // Check if using OpenAI key (Standard Tier)
+            const key = localStorage.getItem('dh_gemini_api_key') || '';
+            if (key.startsWith('sk-')) {
+                setIsStandardTier(true);
+            }
         };
         load();
     }, []);
 
     const handleAnalyze = async () => {
         if (!uid || !market) return;
+
+        if (isStandardTier) {
+            alert("Tính năng này chỉ dành cho tài khoản VIP (Gemini API). Vui lòng nâng cấp.");
+            return;
+        }
+
         setAnalyzing(true);
         try {
             const result = await financialService.generateWeeklyMarketAnalysis(uid, market);
@@ -109,6 +122,15 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
 
     const handleFetchNews = async () => {
         if (!uid) return;
+
+        if (isStandardTier) {
+            // Allow restricted news fetch or just warn? 
+            // Requirements say "cannot use analysis info and market news"
+            // OpenAI also doesn't have Google Search grounding, so we block it.
+            alert("Tính năng tin tức thị trường chỉ dành cho tài khoản VIP.");
+            return;
+        }
+
         setLoadingNews(true);
         try {
             const content = await financialService.getMarketNews();
@@ -151,16 +173,16 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
                         <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-xl">📰</div>
                         <div>
                             <h3 className="text-lg font-bold text-white">Tin tức Thị trường & Bất động sản</h3>
-                            <p className="text-xs text-gray-400">Tổng hợp từ Google Search</p>
+                            <p className="text-xs text-gray-400">Tổng hợp từ Google Search {isStandardTier && '(Yêu cầu VIP)'}</p>
                         </div>
                     </div>
                     <button
                         onClick={handleFetchNews}
-                        disabled={loadingNews || !uid}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-sm shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                        disabled={loadingNews || !uid || isStandardTier}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-sm shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 disabled:bg-gray-700"
                     >
-                        {loadingNews ? <span className="animate-spin">↻</span> : '🔍'}
-                        {loadingNews ? 'Đang tìm kiếm...' : 'Cập nhật Tin tức'}
+                        {loadingNews ? <span className="animate-spin">↻</span> : (isStandardTier ? '🔒' : '🔍')}
+                        {loadingNews ? 'Đang tìm kiếm...' : (isStandardTier ? 'VIP Only' : 'Cập nhật Tin tức')}
                     </button>
                 </div>
 
@@ -176,7 +198,10 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
                         </div>
                     ) : (
                         <div className="text-center py-8 text-gray-500 italic">
-                            Nhấn "Cập nhật Tin tức" để xem thông tin mới nhất về Tài chính và Bất động sản Việt Nam.
+                            {isStandardTier
+                                ? "Tính năng Tin tức bị giới hạn ở gói Standard. Vui lòng nâng cấp lên VIP."
+                                : 'Nhấn "Cập nhật Tin tức" để xem thông tin mới nhất về Tài chính và Bất động sản Việt Nam.'
+                            }
                         </div>
                     )}
                 </div>
@@ -189,24 +214,27 @@ export const InvestmentDashboard: React.FC<{ uid?: string }> = ({ uid }) => {
                         <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-2xl shadow-lg shadow-indigo-900/50">🧠</div>
                         <div>
                             <h3 className="text-lg font-bold text-white">Phân tích & Nhận định Tuần</h3>
-                            <p className="text-xs text-indigo-300">Powered by Gemini 2.5 Flash</p>
+                            <p className="text-xs text-indigo-300">Powered by Gemini 2.5 Flash {isStandardTier && '(Yêu cầu VIP)'}</p>
                         </div>
                     </div>
 
                     <button
                         onClick={handleAnalyze}
-                        disabled={analyzing || !uid}
-                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                        disabled={analyzing || !uid || isStandardTier}
+                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 disabled:bg-gray-700"
                     >
-                        {analyzing ? <span className="animate-spin">↻</span> : '✨'}
-                        {analyzing ? 'Đang phân tích...' : 'Tạo Báo Cáo Tuần'}
+                        {analyzing ? <span className="animate-spin">↻</span> : (isStandardTier ? '🔒' : '✨')}
+                        {analyzing ? 'Đang phân tích...' : (isStandardTier ? 'VIP Only' : 'Tạo Báo Cáo Tuần')}
                     </button>
                 </div>
 
                 {!aiResult ? (
                     <div className="text-center py-10 border-2 border-dashed border-gray-800 rounded-xl">
                         <p className="text-gray-400 text-sm">
-                            Nhấn nút trên để AI so sánh chênh lệch giá vàng nội địa/thế giới và đưa ra lời khuyên.
+                            {isStandardTier
+                                ? "Tính năng Phân tích thị trường bị giới hạn ở gói Standard. Vui lòng liên hệ Admin để nâng cấp VIP."
+                                : "Nhấn nút trên để AI so sánh chênh lệch giá vàng nội địa/thế giới và đưa ra lời khuyên."
+                            }
                         </p>
                         {!uid && <p className="text-xs text-red-400 mt-2">Yêu cầu đăng nhập để sử dụng tính năng này.</p>}
                     </div>

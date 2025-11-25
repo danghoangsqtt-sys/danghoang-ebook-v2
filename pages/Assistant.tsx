@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { geminiService, floatTo16BitPCM } from '../services/gemini';
 
@@ -9,6 +10,7 @@ export const Assistant: React.FC = () => {
   ]);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isStandardTier, setIsStandardTier] = useState(false);
 
   // Refs
   const isLiveRef = useRef(false);
@@ -22,6 +24,14 @@ export const Assistant: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    // Check key type on mount
+    const key = localStorage.getItem('dh_gemini_api_key') || '';
+    if (key.startsWith('sk-')) {
+      setIsStandardTier(true);
+    }
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -65,6 +75,11 @@ export const Assistant: React.FC = () => {
 
   // Start Live Mode
   const startLive = async () => {
+    if (isStandardTier) {
+      alert("Live Chat Voice không hỗ trợ tài khoản Standard (OpenAI Key). Vui lòng nâng cấp VIP để dùng Gemini Live.");
+      return;
+    }
+
     try {
       setIsLiveConnected(true);
       isLiveRef.current = true;
@@ -167,8 +182,12 @@ export const Assistant: React.FC = () => {
           >Chat</button>
           <button
             onClick={() => { setMode('live'); }}
-            className={`px-3 py-1 rounded text-sm ${mode === 'live' ? 'bg-white text-blue-600 font-bold' : 'bg-blue-700 text-blue-100'}`}
-          >Live Voice</button>
+            disabled={isStandardTier}
+            className={`px-3 py-1 rounded text-sm flex items-center gap-1 ${mode === 'live' ? 'bg-white text-blue-600 font-bold' : 'bg-blue-700 text-blue-100 disabled:opacity-50'}`}
+            title={isStandardTier ? "Yêu cầu VIP (Gemini)" : "Live Voice"}
+          >
+            {isStandardTier && <span className="text-[10px]">🔒</span>} Live Voice
+          </button>
         </div>
       </div>
 
@@ -202,9 +221,18 @@ export const Assistant: React.FC = () => {
               <span className="text-4xl">👩‍🚀</span>
             </div>
             <h3 className="text-xl font-semibold text-gray-700">
-              {isLiveConnected ? "Nana đang lắng nghe..." : "Sẵn sàng trò chuyện"}
+              {isStandardTier
+                ? "Tính năng bị giới hạn"
+                : (isLiveConnected ? "Nana đang lắng nghe..." : "Sẵn sàng trò chuyện")
+              }
             </h3>
-            {!isLiveConnected ? (
+
+            {isStandardTier ? (
+              <div className="text-center space-y-2">
+                <p className="text-red-500 text-sm font-bold">Bạn đang dùng gói Standard (OpenAI)</p>
+                <p className="text-sm text-gray-500">Live Voice yêu cầu gói VIP (Gemini AI) để hoạt động.</p>
+              </div>
+            ) : !isLiveConnected ? (
               <button onClick={startLive} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold hover:bg-blue-700 shadow-lg transition-transform hover:scale-105">
                 Bắt đầu cuộc gọi ("Nana ơi")
               </button>
@@ -213,9 +241,12 @@ export const Assistant: React.FC = () => {
                 Kết thúc
               </button>
             )}
-            <p className="text-sm text-gray-500 max-w-md text-center">
-              Chế độ Live cho phép đàm thoại trực tiếp thời gian thực. Hãy chắc chắn bạn đã đeo tai nghe để tránh tiếng vọng.
-            </p>
+
+            {!isStandardTier && (
+              <p className="text-sm text-gray-500 max-w-md text-center">
+                Chế độ Live cho phép đàm thoại trực tiếp thời gian thực. Hãy chắc chắn bạn đã đeo tai nghe để tránh tiếng vọng.
+              </p>
+            )}
           </div>
         )}
       </div>

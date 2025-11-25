@@ -60,12 +60,37 @@ export const AdminDashboard: React.FC = () => {
     const handleToggleStatus = async (uid: string, field: 'isActiveAI' | 'storageEnabled') => {
         const user = users.find(u => u.uid === uid);
         if (!user) return;
-        const newValue = !user[field];
+
+        let updateData: Partial<FirestoreUser> = {};
+        let logMsg = '';
+
+        if (field === 'isActiveAI') {
+            // Cycle: Standard (true) -> VIP (true) -> Off (false) -> Standard (true)
+            // Wait, logic:
+            // If !active -> Standard
+            // If active & standard -> VIP
+            // If active & vip -> Off
+
+            if (!user.isActiveAI) {
+                updateData = { isActiveAI: true, aiTier: 'standard' };
+                logMsg = `Kích hoạt AI (Standard) cho ${user.name}`;
+            } else if (user.aiTier === 'standard') {
+                updateData = { isActiveAI: true, aiTier: 'vip' };
+                logMsg = `Nâng cấp AI (VIP) cho ${user.name}`;
+            } else {
+                updateData = { isActiveAI: false, aiTier: undefined }; // undefined or stay previous but inactive
+                logMsg = `Tắt AI cho ${user.name}`;
+            }
+        } else {
+            // Storage is simple boolean
+            updateData = { storageEnabled: !user.storageEnabled };
+            logMsg = `${!user.storageEnabled ? 'Bật' : 'Tắt'} Cloud Storage cho ${user.name}`;
+        }
 
         try {
-            await firebaseService.updateUserStatus(uid, { [field]: newValue });
-            setUsers(prev => prev.map(u => u.uid === uid ? { ...u, [field]: newValue } : u));
-            addLog(`${newValue ? 'Bật' : 'Tắt'} ${field} cho ${user.name}`, 'warning');
+            await firebaseService.updateUserStatus(uid, updateData);
+            setUsers(prev => prev.map(u => u.uid === uid ? { ...u, ...updateData } : u));
+            addLog(logMsg, 'warning');
         } catch (e) {
             alert("Lỗi cập nhật trạng thái");
         }
@@ -124,7 +149,8 @@ export const AdminDashboard: React.FC = () => {
                 email: newUser.email,
                 role: newUser.role as 'admin' | 'user',
                 avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(newUser.name)}&background=random`,
-                isActiveAI: true
+                isActiveAI: true,
+                aiTier: 'standard' // Default new users to standard
             });
             addLog(`Tạo profile mới: ${newUser.name}`, 'success');
             setShowAddModal(false);
@@ -271,7 +297,7 @@ export const AdminDashboard: React.FC = () => {
                                     <div className="col-span-2">
                                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Trạng thái tài khoản</label>
                                         <div className="flex gap-3 mt-1">
-                                            <Badge active={selectedUser.isActiveAI} label="AI Access" />
+                                            <Badge active={selectedUser.isActiveAI} label={`AI: ${selectedUser.aiTier?.toUpperCase() || 'OFF'}`} color={selectedUser.aiTier === 'vip' ? 'purple' : 'green'} />
                                             <Badge active={selectedUser.storageEnabled} label="Cloud Storage" />
                                             <Badge active={!selectedUser.isLocked} label="Account Active" color="purple" />
                                         </div>
