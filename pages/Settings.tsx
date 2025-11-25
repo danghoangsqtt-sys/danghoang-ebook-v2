@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, Component } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../App';
 import { UserProfile } from '../types';
 import { firebaseService } from '../services/firebase';
@@ -24,7 +24,7 @@ interface ErrorBoundaryProps {
     children?: React.ReactNode;
 }
 
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
     constructor(props: ErrorBoundaryProps) {
         super(props);
         this.state = { hasError: false };
