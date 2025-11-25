@@ -24,12 +24,17 @@ export interface FirestoreUser {
     lastLogin: number;
     geminiApiKey?: string;
     isActiveAI?: boolean;
-    aiTier?: 'standard' | 'vip'; // New field for tiers
+    aiTier?: 'standard' | 'vip';
     storageEnabled?: boolean;
     isLocked?: boolean;
     role?: 'admin' | 'user';
     createdAt?: number;
     metadata?: any;
+
+    // New Fields for Time-based Access & Violations
+    aiActivationDate?: number;
+    aiExpirationDate?: number | null; // null means permanent
+    violationReason?: string;
 }
 
 class FirebaseService {
@@ -76,7 +81,6 @@ class FirebaseService {
 
     async loginWithGoogle(): Promise<{ user: firebase.User, token?: string, apiKey?: string } | null> {
         const provider = new firebase.auth.GoogleAuthProvider();
-        // Modified: Removed Calendar scope to avoid verification issues
         provider.addScope('email');
         provider.addScope('profile');
 
@@ -94,17 +98,26 @@ class FirebaseService {
             try {
                 const docSnap = await this.db.collection("users").doc(user.uid).get();
                 if (docSnap.exists) {
-                    const data = docSnap.data();
+                    const data = docSnap.data() as FirestoreUser;
                     storedApiKey = data?.geminiApiKey || '';
 
                     // Check if locked
                     if (data?.isLocked) {
                         await this.auth.signOut();
-                        throw new Error("Account Locked");
+                        throw new Error(`Account Locked: ${data.violationReason || 'Violation detected'}`);
+                    }
+
+                    // Check Expiration on Login
+                    if (data.isActiveAI && data.aiExpirationDate && Date.now() > data.aiExpirationDate) {
+                        await this.updateUserStatus(user.uid, {
+                            isActiveAI: false,
+                            aiTier: undefined, // Reset tier
+                            violationReason: "Subscription Expired"
+                        });
                     }
                 }
             } catch (e) {
-                if ((e as any).message === "Account Locked") throw e;
+                if ((e as any).message.includes("Account Locked")) throw e;
                 console.error("Error fetching user data on login", e);
             }
 
@@ -130,9 +143,7 @@ class FirebaseService {
     private async syncUserToFirestore(user: firebase.User) {
         try {
             const isSysAdmin = user.email === this.ADMIN_EMAIL;
-            // Only set defaults if not exists, preserve existing tier
             const docRef = this.db.collection("users").doc(user.uid);
-            const docSnap = await docRef.get();
 
             const updateData: any = {
                 uid: user.uid,
@@ -147,6 +158,7 @@ class FirebaseService {
                 updateData.aiTier = 'vip';
                 updateData.storageEnabled = true;
                 updateData.role = 'admin';
+                updateData.aiExpirationDate = null; // Permanent
             }
 
             await docRef.set(updateData, { merge: true });
@@ -162,7 +174,6 @@ class FirebaseService {
             const querySnapshot = await this.db.collection("users").get();
             const users: FirestoreUser[] = [];
             querySnapshot.forEach((doc) => {
-                // IMPORTANT: Map doc.id to uid to ensure delete operations target the correct document
                 const userData = doc.data();
                 users.push({ ...userData, uid: doc.id } as FirestoreUser);
             });
@@ -174,12 +185,11 @@ class FirebaseService {
     }
 
     async updateUserApiKey(targetUid: string, apiKey: string) {
-        // Allow if Admin OR if targetUid is current user
         if (this.currentUser?.uid === targetUid || await this.isUserAuthorized()) {
             try {
                 await this.db.collection("users").doc(targetUid).set({
                     geminiApiKey: apiKey,
-                    isActiveAI: !!apiKey // Auto active if they provide a key (or keep it active)
+                    isActiveAI: !!apiKey
                 }, { merge: true });
             } catch (e) {
                 console.error("Error updating user API key", e);
@@ -211,11 +221,9 @@ class FirebaseService {
         }
     }
 
-    // New method to delete user profile (Firestore only)
     async deleteUserDocument(uid: string) {
         if (this.currentUser?.email !== this.ADMIN_EMAIL) throw new Error("Unauthorized");
         try {
-            // Delete main doc
             await this.db.collection("users").doc(uid).delete();
             console.log(`Deleted user doc ${uid}`);
         } catch (e) {
@@ -224,11 +232,9 @@ class FirebaseService {
         }
     }
 
-    // New method to manually create a user profile
     async createUserProfile(data: Partial<FirestoreUser>) {
         if (this.currentUser?.email !== this.ADMIN_EMAIL) throw new Error("Unauthorized");
 
-        // Use provided UID or generate one
         const uid = data.uid || `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
         try {
@@ -256,6 +262,12 @@ class FirebaseService {
             if (docSnap.exists) {
                 const data = docSnap.data();
                 if (data?.isLocked) return null;
+
+                // Check expiration here too
+                if (data?.isActiveAI && data?.aiExpirationDate && Date.now() > data.aiExpirationDate) {
+                    return null;
+                }
+
                 return data?.geminiApiKey || null;
             }
         } catch (e) {
@@ -280,10 +292,17 @@ class FirebaseService {
         try {
             const docSnap = await this.db.collection("users").doc(user.uid).get();
             if (docSnap.exists) {
-                const data = docSnap.data();
+                const data = docSnap.data() as FirestoreUser;
                 if (data) {
                     if (data.isLocked) return false;
-                    // isAuth is true if storageEnabled OR isActiveAI is explicitly true
+
+                    // Check Expiration
+                    if (data.isActiveAI && data.aiExpirationDate && Date.now() > data.aiExpirationDate) {
+                        // Ideally update DB here, but for read performance, just return false
+                        this._authCache = { uid: user.uid, value: false };
+                        return false;
+                    }
+
                     const isAuth = data.storageEnabled === true || data.isActiveAI === true;
                     this._authCache = { uid: user.uid, value: isAuth };
                     return isAuth;
@@ -342,13 +361,11 @@ class FirebaseService {
     }
 
     async saveSpeakingSession(session: SpeakingSession) {
-        // Save Local
         const localKey = 'dh_speaking_sessions';
         const current = JSON.parse(localStorage.getItem(localKey) || '[]');
         current.unshift(session);
-        localStorage.setItem(localKey, JSON.stringify(current.slice(0, 50))); // Keep last 50 locally
+        localStorage.setItem(localKey, JSON.stringify(current.slice(0, 50)));
 
-        // Save Cloud
         if (this.currentUser && await this.isUserAuthorized()) {
             try {
                 await this.db.collection("users").doc(this.currentUser.uid).collection("speaking_history").add(session);
@@ -359,7 +376,6 @@ class FirebaseService {
     }
 
     async getSpeakingSessions(): Promise<SpeakingSession[]> {
-        // Load Cloud
         if (this.currentUser && await this.isUserAuthorized()) {
             try {
                 const snapshot = await this.db.collection("users").doc(this.currentUser.uid)
@@ -375,7 +391,6 @@ class FirebaseService {
                 console.error("Error fetching speaking sessions", e);
             }
         }
-        // Fallback Local
         const localKey = 'dh_speaking_sessions';
         return JSON.parse(localStorage.getItem(localKey) || '[]');
     }
@@ -484,7 +499,6 @@ class FirebaseService {
         }
     }
 
-    // --- SYSTEM CONFIGURATION ---
     async getSystemConfig() {
         try {
             const doc = await this.db.collection('system').doc('public').get();
@@ -493,8 +507,6 @@ class FirebaseService {
             }
             return null;
         } catch (e) {
-            // Suppress error logs for public config reads which might fail due to permissions
-            // console.error("Error fetching system config", e);
             return null;
         }
     }

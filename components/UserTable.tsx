@@ -4,7 +4,8 @@ import { FirestoreUser } from '../services/firebase';
 
 interface UserTableProps {
     users: FirestoreUser[];
-    onToggleStatus: (uid: string, field: 'isActiveAI' | 'storageEnabled') => void;
+    onActivateClick: (user: FirestoreUser) => void;
+    onPunishClick: (user: FirestoreUser) => void;
     onUpdateKey: (uid: string, key: string) => void;
     onLock: (uid: string) => void;
     onDelete: (uid: string) => void;
@@ -12,7 +13,7 @@ interface UserTableProps {
     onAdd: () => void;
 }
 
-export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onUpdateKey, onLock, onDelete, onView, onAdd }) => {
+export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, onPunishClick, onUpdateKey, onLock, onDelete, onView, onAdd }) => {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<'ALL' | 'ACTIVE' | 'LOCKED' | 'ADMIN'>('ALL');
     const [currentPage, setCurrentPage] = useState(1);
@@ -36,6 +37,18 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onU
 
     const totalPages = Math.ceil(filteredUsers.length / pageSize);
     const currentData = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+    const getExpirationDisplay = (user: FirestoreUser) => {
+        if (!user.isActiveAI) return null;
+        if (!user.aiExpirationDate) return <span className="text-[9px] text-green-600 font-bold">∞ Lifetime</span>;
+
+        const now = Date.now();
+        const daysLeft = Math.ceil((user.aiExpirationDate - now) / (1000 * 60 * 60 * 24));
+
+        if (daysLeft < 0) return <span className="text-[9px] text-red-600 font-bold">Expired</span>;
+        if (daysLeft < 7) return <span className="text-[9px] text-orange-600 font-bold">{daysLeft} days left</span>;
+        return <span className="text-[9px] text-gray-500">{new Date(user.aiExpirationDate).toLocaleDateString()}</span>;
+    };
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col h-full">
@@ -63,7 +76,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onU
                         className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 outline-none cursor-pointer dark:text-white"
                     >
                         <option value="ALL">All</option>
-                        <option value="ACTIVE">Active</option>
+                        <option value="ACTIVE">Active AI</option>
                         <option value="LOCKED">Locked</option>
                         <option value="ADMIN">Admins</option>
                     </select>
@@ -76,7 +89,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onU
                     <thead className="bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400 uppercase text-xs font-bold">
                         <tr>
                             <th className="px-4 py-3">Profile</th>
-                            <th className="px-4 py-3 text-center">Features</th>
+                            <th className="px-4 py-3 text-center">AI Access</th>
                             <th className="px-4 py-3 text-center">Status</th>
                             <th className="px-4 py-3 text-right">Actions</th>
                         </tr>
@@ -99,36 +112,28 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onU
                                     </div>
                                 </td>
                                 <td className="px-4 py-3 text-center">
-                                    <div className="flex justify-center gap-1">
+                                    <div className="flex flex-col items-center gap-1">
                                         <button
-                                            onClick={() => onToggleStatus(user.uid, 'isActiveAI')}
+                                            onClick={() => onActivateClick(user)}
                                             disabled={user.isLocked}
-                                            className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 ${user.isActiveAI && user.aiTier === 'vip'
-                                                    ? 'bg-purple-50 border-purple-200 text-purple-600 shadow-sm'
+                                            className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 transition-all ${user.isActiveAI && user.aiTier === 'vip'
+                                                    ? 'bg-purple-50 border-purple-200 text-purple-600 hover:bg-purple-100'
                                                     : user.isActiveAI
-                                                        ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm'
-                                                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white opacity-60'
+                                                        ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                                                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white hover:border-blue-300 hover:text-blue-500'
                                                 }`}
-                                            title={`AI Access: ${user.aiTier ? user.aiTier.toUpperCase() : 'OFF'}`}
                                         >
-                                            {user.isActiveAI && user.aiTier === 'vip' ? '🌟' : '🤖'}
-                                            <span className="text-[10px] font-bold uppercase">
-                                                {user.isActiveAI ? (user.aiTier === 'vip' ? 'VIP' : 'STD') : 'OFF'}
-                                            </span>
+                                            {user.isActiveAI ? (user.aiTier === 'vip' ? '🌟 VIP' : '🤖 STD') : 'OFF'}
                                         </button>
-                                        <button
-                                            onClick={() => onToggleStatus(user.uid, 'storageEnabled')}
-                                            disabled={user.isLocked}
-                                            className={`p-1.5 rounded-lg border transition-all ${user.storageEnabled ? 'bg-green-50 border-green-200 text-green-600 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-white opacity-60'}`}
-                                            title="Toggle Storage"
-                                        >
-                                            💾
-                                        </button>
+                                        {getExpirationDisplay(user)}
                                     </div>
                                 </td>
                                 <td className="px-4 py-3 text-center">
                                     {user.isLocked ? (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">LOCKED</span>
+                                        <div className="flex flex-col items-center">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">LOCKED</span>
+                                            {user.violationReason && <span className="text-[9px] text-red-500 max-w-[80px] truncate" title={user.violationReason}>{user.violationReason}</span>}
+                                        </div>
                                     ) : user.isActiveAI ? (
                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">ACTIVE</span>
                                     ) : (
@@ -140,18 +145,13 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onToggleStatus, onU
                                         <button onClick={() => onView(user)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Details">
                                             👁️
                                         </button>
-                                        <button onClick={() => onLock(user.uid)} className={`p-1.5 rounded transition-colors ${user.isLocked ? 'text-orange-600 hover:bg-orange-50' : 'text-gray-400 hover:text-orange-600 hover:bg-gray-50'}`} title={user.isLocked ? "Unlock" : "Lock"}>
-                                            {user.isLocked ? '🔓' : '🔒'}
-                                        </button>
+                                        {/* Punish / Lock Button */}
                                         <button
-                                            onClick={() => {
-                                                const key = prompt("Assign API Key for " + user.name, user.geminiApiKey || "");
-                                                if (key !== null) onUpdateKey(user.uid, key);
-                                            }}
-                                            className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-                                            title="Manage Key"
+                                            onClick={() => onPunishClick(user)}
+                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                            title="Punish / Revoke"
                                         >
-                                            🔑
+                                            ⚖️
                                         </button>
                                         <button onClick={() => onDelete(user.uid)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete">
                                             🗑️
