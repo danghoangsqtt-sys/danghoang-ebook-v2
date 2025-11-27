@@ -200,7 +200,8 @@ export const AdminDashboard: React.FC = () => {
                 role: newUser.role as 'admin' | 'user',
                 avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(newUser.name)}&background=random`,
                 isActiveAI: true,
-                aiTier: 'standard'
+                aiTier: 'standard',
+                storageEnabled: false // Default storage off for manually created
             });
             addLog(`Tạo profile mới: ${newUser.name}`, 'success');
             setShowAddModal(false);
@@ -217,6 +218,20 @@ export const AdminDashboard: React.FC = () => {
         setSelectedUser(user);
         setViewTab('profile');
         setShowViewModal(true);
+    };
+
+    // New Handler for Storage Toggle
+    const handleToggleStorage = async (user: FirestoreUser) => {
+        if (user.role === 'admin') return alert("Admin luôn có quyền Storage.");
+
+        const newStorageState = !user.storageEnabled;
+        try {
+            await firebaseService.updateUserStatus(user.uid, { storageEnabled: newStorageState });
+            setUsers(prev => prev.map(u => u.uid === user.uid ? { ...u, storageEnabled: newStorageState } : u));
+            addLog(`${newStorageState ? 'Kích hoạt' : 'Tắt'} Cloud Storage cho ${user.name}`, newStorageState ? 'success' : 'warning');
+        } catch (e) {
+            alert("Lỗi cập nhật quyền Storage.");
+        }
     };
 
     if (loading) return (
@@ -240,6 +255,7 @@ export const AdminDashboard: React.FC = () => {
                         onDelete={handleDeleteUser}
                         onView={handleViewUser}
                         onAdd={() => setShowAddModal(true)}
+                        onToggleStorage={handleToggleStorage}
                     />
                 </div>
 

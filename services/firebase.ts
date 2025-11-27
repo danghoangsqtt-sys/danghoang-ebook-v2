@@ -289,6 +289,7 @@ class FirebaseService {
         return null;
     }
 
+    // General access check (Active AI OR Storage)
     async isUserAuthorized(): Promise<boolean> {
         if (!this.auth.currentUser) return false;
         const user = this.auth.currentUser;
@@ -311,7 +312,6 @@ class FirebaseService {
 
                     // Check Expiration
                     if (data.isActiveAI && data.aiExpirationDate && Date.now() > data.aiExpirationDate) {
-                        // Ideally update DB here, but for read performance, just return false
                         this._authCache = { uid: user.uid, value: false };
                         return false;
                     }
@@ -329,11 +329,34 @@ class FirebaseService {
         return false;
     }
 
+    // Specific check for Cloud Storage capability
+    async isCloudStorageEnabled(): Promise<boolean> {
+        if (!this.auth.currentUser) return false;
+        const user = this.auth.currentUser;
+
+        // Admin always has storage
+        if (user.email === this.ADMIN_EMAIL) return true;
+
+        try {
+            const docSnap = await this.db.collection("users").doc(user.uid).get();
+            if (docSnap.exists) {
+                const data = docSnap.data() as FirestoreUser;
+                return data && !data.isLocked && data.storageEnabled === true;
+            }
+        } catch (e) {
+            console.warn("Cloud storage check failed", e);
+        }
+        return false;
+    }
+
     async getUserData(moduleName: string): Promise<any> {
         const localKey = `dh_${moduleName}`;
+        // Always try to fetch cloud data if possible to keep sync
         if (this.currentUser) {
-            const isAuth = await this.isUserAuthorized();
-            if (isAuth) {
+            // Note: We use isCloudStorageEnabled() to verify if we SHOULD pull data
+            // If storage is disabled, we rely on local.
+            const hasStorage = await this.isCloudStorageEnabled();
+            if (hasStorage) {
                 try {
                     const docSnap = await this.db.collection("users").doc(this.currentUser.uid).collection("modules").doc(moduleName).get();
                     if (docSnap.exists) {
@@ -354,15 +377,12 @@ class FirebaseService {
 
     async saveUserData(moduleName: string, data: any) {
         const localKey = `dh_${moduleName}`;
-        // cleanData is not needed here as localStorage uses JSON.stringify which handles basics, 
-        // but for consistency we can use it if data might have undefineds.
-        // For now, just basic sanity.
         const sanitizedData = this.cleanData(data);
         localStorage.setItem(localKey, JSON.stringify(sanitizedData));
 
         if (this.currentUser) {
-            const isAuth = await this.isUserAuthorized();
-            if (isAuth) {
+            const hasStorage = await this.isCloudStorageEnabled();
+            if (hasStorage) {
                 try {
                     await this.db.collection("users").doc(this.currentUser.uid).collection("modules").doc(moduleName).set({
                         data: sanitizedData,
@@ -382,7 +402,7 @@ class FirebaseService {
         current.unshift(session);
         localStorage.setItem(localKey, JSON.stringify(current.slice(0, 50)));
 
-        if (this.currentUser && await this.isUserAuthorized()) {
+        if (this.currentUser && await this.isCloudStorageEnabled()) {
             try {
                 await this.db.collection("users").doc(this.currentUser.uid).collection("speaking_history").add(this.cleanData(session));
             } catch (e) {
@@ -392,7 +412,7 @@ class FirebaseService {
     }
 
     async getSpeakingSessions(): Promise<SpeakingSession[]> {
-        if (this.currentUser && await this.isUserAuthorized()) {
+        if (this.currentUser && await this.isCloudStorageEnabled()) {
             try {
                 const snapshot = await this.db.collection("users").doc(this.currentUser.uid)
                     .collection("speaking_history")
@@ -412,8 +432,9 @@ class FirebaseService {
     }
 
     async uploadFile(file: File, folder: string = 'courses'): Promise<string> {
-        const isAuth = await this.isUserAuthorized();
-        if (isAuth && this.auth.currentUser) {
+        const hasStorage = await this.isCloudStorageEnabled();
+
+        if (hasStorage && this.auth.currentUser) {
             try {
                 const fileId = Date.now().toString(36) + '_' + file.name.replace(/[^a-z0-9.]/gi, '_');
                 let storagePath = `demo-uploads/${folder}/${fileId}`;
@@ -441,7 +462,7 @@ class FirebaseService {
             localStorage.setItem('dh_course_tree_v2', JSON.stringify(sanitizedTree));
         } catch (e) { }
 
-        if (this.auth.currentUser) {
+        if (this.auth.currentUser && await this.isCloudStorageEnabled()) {
             try {
                 await this.db.collection("users").doc(this.auth.currentUser.uid).collection("modules").doc("course_tree").set({
                     data: sanitizedTree,
@@ -452,7 +473,7 @@ class FirebaseService {
     }
 
     async getCourseTree(): Promise<CourseNode[] | null> {
-        if (this.auth.currentUser) {
+        if (this.auth.currentUser && await this.isCloudStorageEnabled()) {
             try {
                 const docSnap = await this.db.collection("users").doc(this.auth.currentUser.uid).collection("modules").doc("course_tree").get();
                 if (docSnap.exists && docSnap.data()?.data) {
@@ -471,30 +492,39 @@ class FirebaseService {
         let habitStreak = 0;
 
         try {
-            const transRef = this.db.collection('users').doc(uid).collection('finance_transactions');
-            const transSnap = await transRef.get();
-            if (!transSnap.empty) {
-                transSnap.forEach(doc => {
-                    const d = doc.data();
-                    const amt = Number(d.amount) || 0;
-                    if (d.type === 'income') financeBalance += amt;
-                    else if (d.type === 'expense') financeBalance -= amt;
-                });
+            // Only attempt cloud fetch if storage enabled (or just rely on local cache logic inside getTransactions/getUserData is handled)
+            // However, financeService has its own logic. We should assume this method aggregates from available sources.
+            // For Admin/Global stats, we might want direct DB access, but for user Dashboard, we stick to permissions.
+
+            // Finance Service directly queries 'finance_transactions' subcollection
+            // We need to verify storage access before querying subcollections
+            const hasStorage = await this.isCloudStorageEnabled();
+
+            if (hasStorage) {
+                const transRef = this.db.collection('users').doc(uid).collection('finance_transactions');
+                const transSnap = await transRef.get();
+                if (!transSnap.empty) {
+                    transSnap.forEach(doc => {
+                        const d = doc.data();
+                        const amt = Number(d.amount) || 0;
+                        if (d.type === 'income') financeBalance += amt;
+                        else if (d.type === 'expense') financeBalance -= amt;
+                    });
+                }
+
+                const vDoc = await this.db.collection("users").doc(uid).collection("modules").doc("vocab_terms").get();
+                if (vDoc.exists) vocabCount = (vDoc.data()?.data || []).length;
+
+                const tDoc = await this.db.collection("users").doc(uid).collection("modules").doc("tasks").get();
+                if (tDoc.exists) pendingTasks = (tDoc.data()?.data || []).filter((t: any) => !t.completed).length;
+
+                const hDoc = await this.db.collection("users").doc(uid).collection("modules").doc("habits").get();
+                if (hDoc.exists) {
+                    const arr = hDoc.data()?.data || [];
+                    activeHabits = arr.length;
+                    habitStreak = arr.length > 0 ? Math.max(...arr.map((h: any) => h.streak || 0)) : 0;
+                }
             }
-
-            const vDoc = await this.db.collection("users").doc(uid).collection("modules").doc("vocab_terms").get();
-            if (vDoc.exists) vocabCount = (vDoc.data()?.data || []).length;
-
-            const tDoc = await this.db.collection("users").doc(uid).collection("modules").doc("tasks").get();
-            if (tDoc.exists) pendingTasks = (tDoc.data()?.data || []).filter((t: any) => !t.completed).length;
-
-            const hDoc = await this.db.collection("users").doc(uid).collection("modules").doc("habits").get();
-            if (hDoc.exists) {
-                const arr = hDoc.data()?.data || [];
-                activeHabits = arr.length;
-                habitStreak = arr.length > 0 ? Math.max(...arr.map((h: any) => h.streak || 0)) : 0;
-            }
-
         } catch (e) {
             console.error("Error aggregating global stats", e);
         }

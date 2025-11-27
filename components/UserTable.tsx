@@ -11,9 +11,10 @@ interface UserTableProps {
     onDelete: (uid: string) => void;
     onView: (user: FirestoreUser) => void;
     onAdd: () => void;
+    onToggleStorage: (user: FirestoreUser) => void;
 }
 
-export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, onPunishClick, onUpdateKey, onLock, onDelete, onView, onAdd }) => {
+export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, onPunishClick, onUpdateKey, onLock, onDelete, onView, onAdd, onToggleStorage }) => {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<'ALL' | 'ACTIVE' | 'LOCKED' | 'ADMIN'>('ALL');
     const [currentPage, setCurrentPage] = useState(1);
@@ -90,6 +91,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, on
                         <tr>
                             <th className="px-4 py-3">Profile</th>
                             <th className="px-4 py-3 text-center">AI Access</th>
+                            <th className="px-4 py-3 text-center">Storage</th>
                             <th className="px-4 py-3 text-center">Status</th>
                             <th className="px-4 py-3 text-right">Actions</th>
                         </tr>
@@ -129,6 +131,16 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, on
                                     </div>
                                 </td>
                                 <td className="px-4 py-3 text-center">
+                                    <button
+                                        onClick={() => onToggleStorage(user)}
+                                        disabled={user.isLocked}
+                                        className={`p-1.5 rounded-lg transition-all ${user.storageEnabled ? 'text-green-600 bg-green-50 hover:bg-green-100' : 'text-gray-400 bg-gray-100 hover:bg-gray-200'}`}
+                                        title={user.storageEnabled ? 'Storage Active' : 'Storage Disabled'}
+                                    >
+                                        {user.storageEnabled ? <span className="text-lg">☁️</span> : <span className="text-lg opacity-50 line-through">☁️</span>}
+                                    </button>
+                                </td>
+                                <td className="px-4 py-3 text-center">
                                     {user.isLocked ? (
                                         <div className="flex flex-col items-center">
                                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">LOCKED</span>
@@ -162,7 +174,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, on
                         ))}
                         {currentData.length === 0 && (
                             <tr>
-                                <td colSpan={4} className="px-4 py-8 text-center text-gray-500 text-xs italic">No users found.</td>
+                                <td colSpan={5} className="px-4 py-8 text-center text-gray-500 text-xs italic">No users found.</td>
                             </tr>
                         )}
                     </tbody>
