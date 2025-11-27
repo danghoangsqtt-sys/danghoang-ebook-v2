@@ -111,7 +111,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, on
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'lastLogin', direction: 'desc' });
     const [currentPage, setCurrentPage] = useState(1);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-    const pageSize = 10;
+    const pageSize = 5;
 
     const filteredUsers = useMemo(() => {
         let result = users.filter(u => {
@@ -204,7 +204,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onActivateClick, on
                 </div>
 
                 {/* 3. Table */}
-                <div className="flex-1 overflow-visible">
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-gray-50 dark:bg-gray-900/80 text-gray-500 dark:text-gray-400 uppercase text-[11px] font-bold tracking-wider sticky top-0 z-10">
                             <tr>

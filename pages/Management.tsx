@@ -17,7 +17,8 @@ const SECURITY_LOGS = [
 const QUOTA_LIMITS = {
     reads: 50000,   // docs/day
     writes: 20000,  // docs/day
-    storage: 1024,  // MB (1GB)
+    storage: 1024,  // MB (1GB) - Firestore
+    cloudStorage: 5120, // MB (5GB) - Firebase Storage
     hosting: 100    // GB bandwidth (Vercel Hobby generous limit)
 };
 
@@ -67,6 +68,7 @@ export const Management: React.FC = () => {
         totalUsers: 0,
         activeAiUsers: 0,
         storageUsedMB: 0, // Firestore storage estimates
+        cloudStorageUsedMB: 0, // Firebase Storage (Files) estimates
         estimatedReads: 0,
         estimatedWrites: 0,
     });
@@ -96,16 +98,22 @@ export const Management: React.FC = () => {
                 const users = await firebaseService.getAllUsers();
                 const total = users.length;
                 const activeAI = users.filter(u => u.isActiveAI).length;
+                const storageEnabledUsers = users.filter(u => u.storageEnabled).length;
 
                 // ESTIMATION ALGORITHM for Spark Plan Usage
-                const estimatedStorage = total * 0.5;
+                const estimatedFirestoreStorage = total * 0.5; // ~0.5MB per user doc structure
                 const dailyReads = total * 35 + 100; // +100 system overhead
                 const dailyWrites = total * 8 + 20;
+
+                // Estimate Cloud Storage (Files/Images)
+                // Assumption: Users with storage enabled use roughly 20MB on average (PDFs, Avatars)
+                const estimatedCloudStorage = storageEnabledUsers * 20 + 5; // +5MB system assets
 
                 setStats({
                     totalUsers: total,
                     activeAiUsers: activeAI,
-                    storageUsedMB: parseFloat(estimatedStorage.toFixed(2)),
+                    storageUsedMB: parseFloat(estimatedFirestoreStorage.toFixed(2)),
+                    cloudStorageUsedMB: parseFloat(estimatedCloudStorage.toFixed(2)),
                     estimatedReads: dailyReads,
                     estimatedWrites: dailyWrites
                 });
@@ -140,6 +148,14 @@ export const Management: React.FC = () => {
                 alert("Lỗi khi cập nhật số Zalo.");
             }
         }
+    };
+
+    const openFirebaseConsole = () => {
+        // Link to the specific bucket for this project
+        const projectId = "e-book-for-me";
+        const bucketId = "e-book-for-me.firebasestorage.app";
+        const url = `https://console.firebase.google.com/u/0/project/${projectId}/storage/${bucketId}/files`;
+        window.open(url, '_blank');
     };
 
     if (isLoading) return (
@@ -273,19 +289,19 @@ export const Management: React.FC = () => {
                 </Card>
 
                 {/* Vercel & Storage */}
-                <Card className="p-6">
+                <Card className="p-6 flex flex-col">
                     <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
-                        <span className="bg-gray-100 text-gray-800 p-1.5 rounded-lg text-lg">▲</span> Hosting & Storage
+                        <span className="bg-gray-100 text-gray-800 p-1.5 rounded-lg text-lg">▲</span> Hosting & Database
                     </h3>
 
                     <ProgressBar
-                        label="Database Storage (Tổng)"
+                        label="Firestore Database Storage (1GB)"
                         current={stats.storageUsedMB}
                         max={QUOTA_LIMITS.storage}
                         colorClass="bg-purple-500"
                     />
 
-                    <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700">
+                    <div className="mt-auto pt-6 border-t border-gray-100 dark:border-gray-700">
                         <div className="flex justify-between items-center mb-2">
                             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Vercel Bandwidth</span>
                             <Badge type="success">Good</Badge>
@@ -295,6 +311,42 @@ export const Management: React.FC = () => {
                             <div className="h-full rounded-full bg-gray-800 dark:bg-gray-200 w-[5%]"></div>
                         </div>
                         <p className="text-[10px] text-right mt-1 text-gray-400">~0.5 GB / 100 GB</p>
+                    </div>
+                </Card>
+
+                {/* NEW: Firebase Cloud Storage Management */}
+                <Card className="p-6 md:col-span-2 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-750">
+                    <div className="flex justify-between items-start mb-4">
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                            <span className="bg-blue-100 text-blue-600 p-1.5 rounded-lg text-lg">🗄️</span> Cloud Storage (Tệp tin & Media)
+                        </h3>
+                        <button
+                            onClick={openFirebaseConsole}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xs shadow-md flex items-center gap-2 transition-transform hover:scale-105"
+                        >
+                            🔗 Mở Firebase Console (Quản lý File)
+                        </button>
+                    </div>
+
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-6 max-w-3xl">
+                        Quản lý dung lượng lưu trữ cho các tệp tin (PDF, Hình ảnh, Video) do người dùng tải lên.
+                        Admin có thể truy cập trực tiếp Console để xem chi tiết và <b>xóa thủ công</b> các nội dung rác hoặc vi phạm.
+                    </p>
+
+                    <ProgressBar
+                        label="Cloud Storage Usage (Giới hạn 5GB)"
+                        current={stats.cloudStorageUsedMB}
+                        max={QUOTA_LIMITS.cloudStorage}
+                        colorClass={stats.cloudStorageUsedMB > QUOTA_LIMITS.cloudStorage * 0.8 ? 'bg-red-500' : 'bg-blue-500'}
+                    />
+
+                    <div className="flex gap-4 mt-2">
+                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span> Tài liệu học tập
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500"></span> Ảnh Avatar
+                        </div>
                     </div>
                 </Card>
             </div>
