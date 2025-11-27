@@ -5,6 +5,7 @@ import { ChatWidget } from './ChatWidget';
 import { Pomodoro } from './Pomodoro';
 import { firebaseService } from '../services/firebase';
 import { UserProfile } from '../types';
+import { useLanguage } from '../App';
 
 // Icons (Using Text/Emoji for simplicity or SVG paths)
 const Icons = {
@@ -22,6 +23,7 @@ const Icons = {
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -90,13 +92,13 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   };
 
   const navItems = [
-    { path: '/', label: 'Tổng Quan', icon: Icons.Dashboard },
-    { path: '/courses', label: 'Học Tập', icon: Icons.Courses },
-    { path: '/english', label: 'Luyện Tiếng Anh', icon: Icons.English },
-    { path: '/vocab-library', label: 'Thư viện từ vựng', icon: Icons.Vocab },
-    { path: '/planner', label: 'Kế Hoạch', icon: Icons.Planner },
-    { path: '/finance', label: 'Tài Chính', icon: Icons.Finance },
-    { path: '/settings', label: 'Cài Đặt', icon: Icons.Settings },
+    { path: '/', label: t('nav.dashboard'), icon: Icons.Dashboard },
+    { path: '/courses', label: t('nav.courses'), icon: Icons.Courses },
+    { path: '/english', label: t('nav.english'), icon: Icons.English },
+    { path: '/vocab-library', label: t('nav.vocab'), icon: Icons.Vocab },
+    { path: '/planner', label: t('nav.planner'), icon: Icons.Planner },
+    { path: '/finance', label: t('nav.finance'), icon: Icons.Finance },
+    { path: '/settings', label: t('nav.settings'), icon: Icons.Settings },
   ];
 
   // Render Status Badge
@@ -164,7 +166,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                     }`}
                 >
                   <span className="mr-3 text-xl group-hover:scale-110 transition-transform"><Icons.Management /></span>
-                  Quản Trị Viên
+                  {t('nav.management')}
                 </Link>
               </div>
             )}

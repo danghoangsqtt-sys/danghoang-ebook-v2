@@ -35,6 +35,14 @@ export interface FirestoreUser {
     aiActivationDate?: number;
     aiExpirationDate?: number | null; // null means permanent
     violationReason?: string | null;
+
+    // Profile Fields
+    jobTitle?: string;
+    phoneNumber?: string;
+    location?: string;
+    bio?: string;
+    skills?: string[];
+    website?: string;
 }
 
 class FirebaseService {
@@ -155,11 +163,20 @@ class FirebaseService {
 
             const updateData: any = {
                 uid: user.uid,
-                name: user.displayName || 'No Name',
+                // Only update basic info if not set, to avoid overwriting profile edits? 
+                // Actually we should keep email/avatar in sync with Google if they change there, 
+                // but let's be careful not to wipe custom fields. merge: true handles this.
                 email: user.email || 'No Email',
-                avatar: user.photoURL || '',
+                // We might NOT want to overwrite 'name' if user customized it in our app.
+                // But for now, let's sync it.
                 lastLogin: Date.now(),
             };
+
+            // Initial creation might need these
+            if (!docRef) {
+                updateData.name = user.displayName || 'User';
+                updateData.avatar = user.photoURL || '';
+            }
 
             if (isSysAdmin) {
                 updateData.isActiveAI = true;
@@ -204,6 +221,16 @@ class FirebaseService {
                 console.error("Error updating user API key", e);
                 throw e;
             }
+        }
+    }
+
+    async updateUserProfile(uid: string, data: Partial<FirestoreUser>) {
+        if (this.currentUser?.uid !== uid) throw new Error("Unauthorized");
+        try {
+            await this.db.collection("users").doc(uid).set(this.cleanData(data), { merge: true });
+        } catch (e) {
+            console.error("Error updating profile", e);
+            throw e;
         }
     }
 
