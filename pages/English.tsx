@@ -114,7 +114,7 @@ const ExternalBrowser = ({ url, title, onClose }: { url: string, title: string, 
     );
 };
 
-// --- REUSABLE MANUAL VOCAB PANEL ---
+// --- REUSABLE MANUAL VOCAB PANEL (Responsive) ---
 interface ManualVocabPanelProps {
     onSave: (word: string, meaning: string, example: string) => void;
     folderLabel: string;
@@ -124,6 +124,7 @@ interface ManualVocabPanelProps {
 const ManualVocabPanel: React.FC<ManualVocabPanelProps> = ({ onSave, folderLabel, className = "" }) => {
     const [form, setForm] = useState({ word: '', meaning: '', example: '' });
     const [recent, setRecent] = useState<{ id: number, word: string, meaning: string }[]>([]);
+    const [isMobileOpen, setIsMobileOpen] = useState(false); // Mobile Toggle State
 
     const handleAdd = () => {
         if (!form.word || !form.meaning) return;
@@ -132,12 +133,16 @@ const ManualVocabPanel: React.FC<ManualVocabPanelProps> = ({ onSave, folderLabel
         setForm({ word: '', meaning: '', example: '' });
     };
 
-    return (
-        <div className={`bg-white dark:bg-gray-800 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 flex flex-col shrink-0 shadow-[-4px_0_15px_rgba(0,0,0,0.02)] z-10 ${className}`}>
-            <div className="p-4 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900">
-                <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 text-base">
-                    <span>📒</span> My Vocabulary Bank
-                </h3>
+    // Shared Content for both Desktop Sidebar and Mobile Bottom Sheet
+    const PanelContent = () => (
+        <div className="flex flex-col h-full bg-white dark:bg-gray-800">
+            <div className="p-4 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
+                <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 text-base">
+                        <span>📒</span> My Vocabulary Bank
+                    </h3>
+                    <span className="lg:hidden text-gray-400 text-xs" onClick={() => setIsMobileOpen(false)}>▼ Đóng</span>
+                </div>
                 <p className="text-[10px] text-gray-400 mt-0.5 uppercase tracking-wider font-bold">Saving to: {folderLabel}</p>
             </div>
 
@@ -190,6 +195,40 @@ const ManualVocabPanel: React.FC<ManualVocabPanelProps> = ({ onSave, folderLabel
                 )}
             </div>
         </div>
+    );
+
+    return (
+        <>
+            {/* Desktop: Sidebar Column */}
+            <div className={`hidden lg:flex flex-col border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 shadow-[-4px_0_15px_rgba(0,0,0,0.02)] z-10 h-full ${className}`}>
+                <PanelContent />
+            </div>
+
+            {/* Mobile: Floating Action Button (FAB) */}
+            <button
+                onClick={() => setIsMobileOpen(true)}
+                className="lg:hidden fixed bottom-6 left-4 z-40 w-12 h-12 bg-gray-900 dark:bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center text-xl animate-fade-in hover:scale-110 transition-transform active:scale-95 border-2 border-white dark:border-gray-800"
+                title="Thêm từ vựng"
+            >
+                📒
+            </button>
+
+            {/* Mobile: Bottom Sheet (Overlay) */}
+            {isMobileOpen && (
+                <div className="lg:hidden fixed inset-0 z-[60] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setIsMobileOpen(false)}>
+                    <div
+                        className="w-full h-[65vh] bg-white dark:bg-gray-800 rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-slide-up border-t border-gray-200 dark:border-gray-700"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Drag Handle */}
+                        <div className="flex justify-center p-2 bg-white dark:bg-gray-900 shrink-0 cursor-pointer" onClick={() => setIsMobileOpen(false)}>
+                            <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-600 rounded-full"></div>
+                        </div>
+                        <PanelContent />
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 
