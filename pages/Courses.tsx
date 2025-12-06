@@ -249,6 +249,13 @@ const TreeItem = React.memo<TreeItemProps>(({ node, level, selectedLessonId, onT
                 </div>
 
                 <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onAction('pin', node); }}
+                        className={`p-1.5 rounded text-xs transition-colors ${node.isPinned ? 'text-blue-600 bg-blue-100 dark:text-blue-300 dark:bg-blue-900/50' : 'text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                        title={node.isPinned ? "Bỏ ghim" : "Ghim"}
+                    >
+                        📌
+                    </button>
                     <button onClick={(e) => { e.stopPropagation(); onAction('edit', node); }} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-400 text-xs" title="Sửa / Di chuyển">✏️</button>
                     <button onClick={(e) => { e.stopPropagation(); onAction('delete', node); }} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500 text-xs" title="Xóa">🗑️</button>
                 </div>
@@ -580,7 +587,7 @@ export const Courses: React.FC = () => {
     };
 
     return (
-        <div className="relative h-full flex flex-col md:flex-row bg-white dark:bg-gray-900 md:rounded-2xl md:border border-gray-200 dark:border-gray-800 md:shadow-xl overflow-hidden">
+        <div className="relative flex flex-col md:flex-row bg-white dark:bg-gray-900 md:rounded-2xl md:border border-gray-200 dark:border-gray-800 md:shadow-xl overflow-hidden h-[calc(100vh-11rem)] md:h-[calc(100vh-7.5rem)]">
 
             {/* --- LIST PANE (Master) --- */}
             <div className={`
@@ -622,7 +629,7 @@ export const Courses: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto py-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700 scrollbar-track-transparent"
+                    <div className="flex-1 overflow-y-auto py-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500"
                         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }} // Prevent root drop by default, allow only into folders or handle root specifically
                     >
                         {courseTree.length > 0 ? (
