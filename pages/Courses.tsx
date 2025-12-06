@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CourseNode, CourseType, LessonContent } from '../types';
 import { firebaseService } from '../services/firebase';
@@ -403,7 +402,7 @@ export const Courses: React.FC = () => {
 
     // Actions
     const resetForm = () => {
-        setTitle(''); setResourceLink(''); setUploadedFile(null); setTopic(''); setLevel(''); setParentId(''); setEditNodeId(null); setLinkType(CourseType.VIDEO);
+        setTitle(''); setResourceLink(''); setUploadedFile(null); setTopic(''); setLevel(''); setParentId('root'); setEditNodeId(null); setLinkType(CourseType.VIDEO);
     };
 
     const handleAction = (action: 'edit' | 'delete' | 'pin', node: CourseNode) => {
@@ -562,21 +561,86 @@ export const Courses: React.FC = () => {
         // Note: Tree saving to Firebase/Local storage is handled by useEffect on [courseTree]
     };
 
-    const renderFolderOptions = (nodes: CourseNode[], depth = 0): React.ReactNode[] => {
-        let opts: React.ReactNode[] = [];
-        nodes.forEach(n => {
-            if (n.type === 'folder') {
-                // Disable selecting self as parent when editing
-                const disabled = editNodeId === n.id;
-                opts.push(
-                    <option key={n.id} value={n.id} disabled={disabled}>
-                        {'\u00A0'.repeat(depth * 4)}📂 {n.title}
-                    </option>
-                );
-                if (n.children) opts = [...opts, ...renderFolderOptions(n.children, depth + 1)];
-            }
-        });
-        return opts;
+    // --- Folder Picker Helper ---
+    const getFolderChildren = (nodes: CourseNode[], parentId: string): CourseNode[] => {
+        if (parentId === 'root') {
+            return nodes;
+        }
+        const parent = findNode(nodes, parentId);
+        return parent ? (parent.children || []) : [];
+    };
+
+    const getFolderPath = (nodes: CourseNode[], targetId: string): { id: string, title: string }[] => {
+        if (targetId === 'root') return [{ id: 'root', title: 'Gốc' }];
+        const path = findPath(nodes, targetId);
+        return [{ id: 'root', title: 'Gốc' }, ...path.map(n => ({ id: n.id, title: n.title }))];
+    };
+
+    // --- Folder Picker Component (Inline) ---
+    const FolderPicker = () => {
+        // Show folders available in the current parentId
+        // Navigating "down" updates parentId
+        // Navigating "up" (via breadcrumbs) updates parentId
+
+        const currentPath = getFolderPath(courseTree, parentId);
+        const subFolders = getFolderChildren(courseTree, parentId).filter(n => n.type === 'folder' && n.id !== editNodeId);
+
+        return (
+            <div className="w-full border border-gray-300 dark:border-gray-600 rounded-xl overflow-hidden bg-white dark:bg-gray-700">
+                {/* Breadcrumb Header */}
+                <div className="bg-gray-100 dark:bg-gray-800 p-2 flex items-center gap-1 overflow-x-auto whitespace-nowrap text-xs border-b border-gray-200 dark:border-gray-600">
+                    {currentPath.map((p, idx) => (
+                        <React.Fragment key={p.id}>
+                            <button
+                                onClick={() => setParentId(p.id)}
+                                className={`hover:bg-gray-200 dark:hover:bg-gray-600 px-2 py-1 rounded transition-colors ${idx === currentPath.length - 1 ? 'font-bold text-gray-800 dark:text-white' : 'text-blue-600 dark:text-blue-400'}`}
+                            >
+                                {p.title}
+                            </button>
+                            {idx < currentPath.length - 1 && <span className="text-gray-400">/</span>}
+                        </React.Fragment>
+                    ))}
+                </div>
+
+                {/* Folder List */}
+                <div className="max-h-40 overflow-y-auto p-2">
+                    {subFolders.length > 0 ? (
+                        <div className="space-y-1">
+                            {subFolders.map(folder => (
+                                <button
+                                    key={folder.id}
+                                    onClick={() => setParentId(folder.id)}
+                                    className="w-full flex items-center gap-2 p-2 hover:bg-blue-50 dark:hover:bg-gray-600 rounded-lg text-left group transition-colors"
+                                >
+                                    <span className="text-yellow-500 text-lg">📁</span>
+                                    <span className="text-sm text-gray-700 dark:text-gray-200 font-medium flex-1">{folder.title}</span>
+                                    <span className="text-xs text-gray-400 opacity-0 group-hover:opacity-100">Mở ▶</span>
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-4 text-gray-400 text-xs italic">
+                            Không có thư mục con.
+                            <br />
+                            (Chọn thư mục này làm cha)
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer Status */}
+                <div className="bg-gray-50 dark:bg-gray-800 p-2 border-t border-gray-200 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center">
+                    <span>Đang chọn: <strong className="text-gray-700 dark:text-gray-200">{currentPath[currentPath.length - 1].title}</strong></span>
+                    {parentId !== 'root' && (
+                        <button onClick={() => {
+                            const parent = currentPath[currentPath.length - 2];
+                            if (parent) setParentId(parent.id);
+                        }} className="text-blue-600 hover:underline">
+                            Lên một cấp ⇑
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -871,12 +935,8 @@ export const Courses: React.FC = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">THƯ MỤC CHA</label>
-                                <select value={parentId} onChange={e => setParentId(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm outline-none bg-white dark:bg-gray-700 dark:text-white">
-                                    <option value="root">-- Thư mục gốc --</option>
-                                    {renderFolderOptions(courseTree)}
-                                </select>
-                                {modalMode === 'edit' && <p className="text-[10px] text-gray-400 mt-1 ml-1">* Đổi thư mục cha để di chuyển vị trí.</p>}
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">THƯ MỤC CHA (CHỌN ĐỂ THÊM VÀO)</label>
+                                <FolderPicker />
                             </div>
                         </div>
 

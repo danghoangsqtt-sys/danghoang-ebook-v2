@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Habit, CalendarEvent, Task } from '../types';
 import { firebaseService } from '../services/firebase';
@@ -77,7 +78,7 @@ export const Planner: React.FC = () => {
     // --- Computed Data for Selected Date ---
     const dayEvents = useMemo(() =>
         events
-            .filter(e => e.start.startsWith(selectedDateStr))
+            .filter(e => formatDate(new Date(e.start)) === selectedDateStr)
             .sort((a, b) => a.start.localeCompare(b.start)),
         [events, selectedDateStr]);
 
@@ -102,7 +103,10 @@ export const Planner: React.FC = () => {
         if (!itemTitle.trim()) return;
 
         if (newItemType === 'event') {
-            const startDateTime = new Date(selectedDateStr);
+            // Construct date explicitly from YYYY-MM-DD to avoid UTC offset issues
+            const [y, m, d] = selectedDateStr.split('-').map(Number);
+            const startDateTime = new Date(y, m - 1, d); // Local time midnight
+
             const [hours, mins] = itemTime.split(':');
             startDateTime.setHours(parseInt(hours), parseInt(mins));
             const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000);
@@ -198,7 +202,7 @@ export const Planner: React.FC = () => {
                         const isToday = dateStr === todayStr;
 
                         // Dots for content
-                        const hasEvent = events.some(e => e.start.startsWith(dateStr));
+                        const hasEvent = events.some(e => formatDate(new Date(e.start)) === dateStr);
                         const hasTask = tasks.some(t => t.date === dateStr && !t.completed);
 
                         return (
@@ -401,19 +405,19 @@ export const Planner: React.FC = () => {
                                             }
                                     `}
                                     >
-                                        <div className="flex items-center gap-3 relative z-10 pr-6">
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 transition-colors ${isDoneToday ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}>
-                                                {isDoneToday ? '✓' : ''}
+                                        <div className="flex justify-between items-start relative z-10">
+                                            <div>
+                                                <h4 className={`font-bold text-sm ${isDoneToday ? 'text-green-700 dark:text-green-400' : 'text-gray-700 dark:text-gray-200'}`}>{h.name}</h4>
+                                                <p className="text-[10px] text-gray-400 mt-1 font-mono">Streak: {h.streak} ngày</p>
                                             </div>
-                                            <div className="min-w-0">
-                                                <h4 className={`font-bold text-sm truncate ${isDoneToday ? 'text-green-700 dark:text-green-400' : 'text-gray-700 dark:text-gray-200'}`}>{h.name}</h4>
-                                                <p className="text-[10px] text-gray-400 mt-0.5 font-mono">Streak: {h.streak} ngày</p>
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs transition-colors ${isDoneToday ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}>
+                                                {isDoneToday ? '✓' : ''}
                                             </div>
                                         </div>
                                         {isDoneToday && <div className="absolute bottom-0 left-0 h-1 bg-green-500 w-full opacity-50"></div>}
                                         <button
                                             onClick={(e) => { e.stopPropagation(); deleteHabit(h.id); }}
-                                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-red-500 transition-opacity z-20 bg-white/80 dark:bg-gray-800/80 rounded-full backdrop-blur-sm hover:bg-red-50 dark:hover:bg-red-900/30"
+                                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity z-20 bg-white/80 dark:bg-gray-800/80 rounded-full"
                                         >
                                             ✕
                                         </button>
